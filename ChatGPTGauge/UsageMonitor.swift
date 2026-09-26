@@ -100,11 +100,14 @@ final class UsageMonitor: ObservableObject {
         secondsUntilLive = liveInterval
         battery = BatteryReader.current()
         reload(userInitiated: false)
-        timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
-            Task { @MainActor in
+        let timer = Timer(timeInterval: 30, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
                 self?.tick()
             }
         }
+        timer.tolerance = 15
+        RunLoop.main.add(timer, forMode: .common)
+        self.timer = timer
     }
 
     func reload(userInitiated: Bool) {
@@ -165,11 +168,17 @@ final class UsageMonitor: ObservableObject {
     }
 
     private func tick() {
-        now = Date()
-        if showBattery, Int(now.timeIntervalSince1970) % 30 == 0 {
-            battery = BatteryReader.current()
+        let next = Date()
+        if Calendar.current.compare(now, to: next, toGranularity: .minute) != .orderedSame {
+            now = next
         }
-        secondsUntilLive -= 1
+        if showBattery {
+            let reading = BatteryReader.current()
+            if reading != battery {
+                battery = reading
+            }
+        }
+        secondsUntilLive -= 30
         if secondsUntilLive <= 0 {
             secondsUntilLive = liveInterval
             reloadTask?.cancel()

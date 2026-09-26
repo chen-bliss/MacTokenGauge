@@ -28,6 +28,7 @@ struct PopoverView: View {
             }
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
+            .fixedSize(horizontal: false, vertical: true)
             .background {
                 GeometryReader { proxy in
                     Color.clear.preference(key: ContentHeightKey.self, value: proxy.size.height)

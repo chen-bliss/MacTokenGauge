@@ -2,9 +2,7 @@ import Foundation
 
 enum ChatGPTAccountLoader {
     static func load(includeLive: Bool) async -> ProviderAccount {
-        async let localTask = Task.detached(priority: .utility) { SessionLogReader.latestSnapshot() }.value
         let auth = CodexAuthReader.load()
-        let local = await localTask
 
         var live: UsageSnapshot?
         var problem: String?
@@ -37,6 +35,7 @@ enum ChatGPTAccountLoader {
         if let live {
             return make(from: live, status: L10n.s(.official))
         }
+        let local = await Task.detached(priority: .utility) { SessionLogReader.latestSnapshot() }.value
         if let local {
             return make(from: local, status: problem ?? L10n.s(.localCodex))
         }

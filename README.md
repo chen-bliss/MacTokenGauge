@@ -12,20 +12,21 @@ The downloadable disk image is on the [Releases](https://github.com/chen-bliss/M
 
 ### What it shows
 
-- ChatGPT usage is read from the official site on the refresh interval. A local Codex record is used only before the site has returned a number, and it does not replace a successful official reading.
+- ChatGPT usage is read from the official site on the refresh interval, using the login already saved by the ChatGPT app. A local record is used only before the site has returned a number, and it does not replace a successful official reading.
 - Cursor and Claude are read when “Read official usage” is on.
 - The menu bar can show text you edit, a battery icon or a battery percent, colored bars, one ring, several rings, or rings combined into one.
 - Display languages follow the system, or you can pick Arabic, Chinese, English, French, Russian, or Spanish.
 - Hold Command and drag the menu bar icon to place it among other apps. It can sit just to the left of Control Center. It cannot move the clock or Control Center.
 - Click outside the panel, or press Esc, to close it.
+- The app stays in the menu bar and does not keep a Dock icon. Open Settings from the panel. Command-Q closes the settings window and leaves the menu bar icon running. Use Quit in the panel to leave the app.
 
 ### Install
 
-1. Download `MacTokenGauge-1.0.0.dmg` from Releases.
+1. Download `MacTokenGauge-1.1.0.dmg` from Releases.
 2. Open the disk image.
 3. Drag **MacTokenGauge** into the Applications folder.
 4. Eject the disk image.
-5. Open MacTokenGauge from Applications. Its icon then stays in the menu bar. The Dock icon opens Settings.
+5. Open MacTokenGauge from Applications. Its icon stays in the menu bar. It does not add a Dock icon.
 
 ### If macOS blocks the download
 
@@ -64,7 +65,7 @@ Then open MacTokenGauge as usual.
 If the disk image itself will not open, clear its marker and open it again:
 
 ```bash
-xattr -dr com.apple.quarantine ~/Downloads/MacTokenGauge-1.0.0.dmg
+xattr -dr com.apple.quarantine ~/Downloads/MacTokenGauge-1.1.0.dmg
 ```
 
 ### Privacy
@@ -79,20 +80,21 @@ Open `ChatGPTGauge.xcodeproj` in Xcode, choose My Mac, and run. The product name
 
 ### 它显示什么
 
-- ChatGPT 按设置里的间隔连接官网读取余量。只有官网还没有返回过数字时，才暂时使用本机 Codex 记录。官网一旦读到过，本机记录不会再盖掉它。
+- ChatGPT 使用 ChatGPT 应用已经保存的登录，按设置里的间隔向官网读取余量。只有官网还没有返回过数字时，才暂时使用本机记录。官网一旦读到过，本机记录不会再盖掉它。
 - 打开“读取官网用量”后，才会读取 Cursor 和 Claude。
 - 菜单栏可以显示自己编写的文字、电池图标或电量百分比、彩色横条、单环、多环，或合成一个环。
 - 界面可以跟随系统语言，也可以在阿拉伯语、中文、英语、法语、俄语、西班牙语里选择。
 - 按住 Command 再拖动菜单栏图标，可以把它放到其他应用图标之间，最远到控制中心的左边。时钟和控制中心不能被挤开。
 - 点击面板以外的地方，或按 Esc，面板会关闭。
+- 应用只留在菜单栏，不会在程序坞里常驻。设置从弹出的面板里打开。Command-Q 只关闭设置窗口，菜单栏图标继续运行。要退出应用，用面板里的“退出”。
 
 ### 安装
 
-1. 在 Releases 页面下载 `MacTokenGauge-1.0.0.dmg`。
+1. 在 Releases 页面下载 `MacTokenGauge-1.1.0.dmg`。
 2. 打开这个磁盘映像。
 3. 把 **MacTokenGauge** 拖进“应用程序”文件夹。
 4. 推出磁盘映像。
-5. 从“应用程序”里打开 MacTokenGauge。图标会出现在菜单栏。点程序坞里的图标可以打开设置。
+5. 从“应用程序”里打开 MacTokenGauge。图标会出现在菜单栏，程序坞里不会再常驻一个图标。
 
 ### 如果系统拦截了下载的文件
 
@@ -131,7 +133,7 @@ xattr -dr com.apple.quarantine /Applications/MacTokenGauge.app
 如果磁盘映像本身打不开，先清掉它的隔离标记，再打开：
 
 ```bash
-xattr -dr com.apple.quarantine ~/Downloads/MacTokenGauge-1.0.0.dmg
+xattr -dr com.apple.quarantine ~/Downloads/MacTokenGauge-1.1.0.dmg
 ```
 
 ### 隐私

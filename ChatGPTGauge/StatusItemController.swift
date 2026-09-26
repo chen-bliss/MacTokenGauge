@@ -9,11 +9,12 @@ final class StatusItemController: NSObject {
     private let popover = NSPopover()
     private let hosting: PassThroughHostingView<MenuBarLabel>
     private var cancellable: AnyCancellable?
-    private var popoverHost: NSHostingController<AnyView>?
+    private var popoverHost: PopoverHostingController?
     private var hostingConstraints: [NSLayoutConstraint] = []
     private var outsideClickMonitor: Any?
     private var localClickMonitor: Any?
     private var resignObserver: NSObjectProtocol?
+    private var labelDigest = ""
 
     init(monitor: UsageMonitor) {
         self.monitor = monitor
@@ -61,14 +62,41 @@ final class StatusItemController: NSObject {
     }
 
     private func updateLabel() {
-        hosting.rootView = Self.label(for: monitor)
-        let contentWidth = max(16, hosting.fittingSize.width)
-        if abs(iconItem.length - contentWidth) > 0.5 {
-            iconItem.length = contentWidth
+        let digest = menuBarDigest()
+        if digest != labelDigest {
+            labelDigest = digest
+            hosting.rootView = Self.label(for: monitor)
+            let contentWidth = max(16, hosting.fittingSize.width)
+            if abs(iconItem.length - contentWidth) > 0.5 {
+                iconItem.length = contentWidth
+            }
         }
         if popover.isShown {
             popoverHost?.rootView = AnyView(popoverRoot)
         }
+    }
+
+    private func menuBarDigest() -> String {
+        let accounts = monitor.accounts.map { account in
+            let windows = account.windows.map { window in
+                "\(window.id):\(Int(window.remainingPercent.rounded())):\(Int(window.resetAt?.timeIntervalSince1970 ?? 0))"
+            }.joined(separator: ",")
+            return "\(account.id)#\(windows)#\(account.status)"
+        }.joined(separator: "|")
+        let battery = monitor.battery.map { "\($0.percent):\($0.charging)" } ?? "-"
+        let minute = Int(monitor.now.timeIntervalSince1970 / 60)
+        let slots = monitor.barSlots.map { "\($0.target):\($0.colorHex)" }.joined(separator: ",")
+        return [
+            monitor.menuBarStyle.rawValue,
+            monitor.menuTextTemplate,
+            monitor.batteryMark.rawValue,
+            monitor.showBattery ? "1" : "0",
+            monitor.appLanguage.rawValue,
+            battery,
+            "\(minute)",
+            slots,
+            accounts
+        ].joined(separator: "§")
     }
 
     private var popoverRoot: some View {
@@ -82,7 +110,16 @@ final class StatusItemController: NSObject {
             popover.performClose(nil)
             return
         }
-        let host = NSHostingController(rootView: AnyView(popoverRoot))
+        let host = PopoverHostingController(rootView: AnyView(popoverRoot))
+        host.safeAreaRegions = []
+        host.sizingOptions = .preferredContentSize
+        host.onSizeChange = { [weak self] size in
+            self?.popover.contentSize = size
+        }
+        let size = host.fittedPopoverSize()
+        host.preferredContentSize = size
+        host.view.frame = NSRect(origin: .zero, size: size)
+        popover.contentSize = size
         popoverHost = host
         popover.contentViewController = host
         NSApp.activate()
@@ -160,6 +197,23 @@ final class StatusItemController: NSObject {
 extension StatusItemController: NSPopoverDelegate {
     func popoverDidClose(_ notification: Notification) {
         endOutsideDismiss()
+    }
+}
+
+private final class PopoverHostingController: NSHostingController<AnyView> {
+    var onSizeChange: ((NSSize) -> Void)?
+
+    func fittedPopoverSize() -> NSSize {
+        let fitted = sizeThatFits(in: NSSize(width: 440, height: 2000))
+        return NSSize(width: 440, height: min(860, max(420, fitted.height)))
+    }
+
+    override func viewDidLayout() {
+        super.viewDidLayout()
+        let size = fittedPopoverSize()
+        guard size.height > preferredContentSize.height + 1 else { return }
+        preferredContentSize = size
+        onSizeChange?(size)
     }
 }
 

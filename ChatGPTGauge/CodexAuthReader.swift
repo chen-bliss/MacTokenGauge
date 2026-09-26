@@ -11,6 +11,9 @@ struct CodexSession: Sendable {
     }
 }
 
+/// The installed ChatGPT.app (bundle id `com.openai.codex`) writes its login here,
+/// in `~/.codex/auth.json`. The gauge only reads that access token and asks
+/// chatgpt.com for usage. It does not refresh the token or write the file back.
 enum CodexAuthReader {
     static func codexHome() -> URL {
         if let override = ProcessInfo.processInfo.environment["CODEX_HOME"], !override.isEmpty {
