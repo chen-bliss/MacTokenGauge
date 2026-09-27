@@ -84,7 +84,7 @@ final class StatusItemController: NSObject {
             return "\(account.id)#\(windows)#\(account.status)"
         }.joined(separator: "|")
         let battery = monitor.battery.map { "\($0.percent):\($0.charging)" } ?? "-"
-        let minute = Int(monitor.now.timeIntervalSince1970 / 60)
+        let minute = monitor.menuBarStyle == .text ? Int(monitor.now.timeIntervalSince1970 / 60) : 0
         let slots = monitor.barSlots.map { "\($0.target):\($0.colorHex)" }.joined(separator: ",")
         return [
             monitor.menuBarStyle.rawValue,
@@ -124,6 +124,7 @@ final class StatusItemController: NSObject {
         popover.contentViewController = host
         NSApp.activate()
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+        monitor.setPopoverVisible(true)
         beginOutsideDismiss()
     }
 
@@ -196,6 +197,7 @@ final class StatusItemController: NSObject {
 
 extension StatusItemController: NSPopoverDelegate {
     func popoverDidClose(_ notification: Notification) {
+        monitor.setPopoverVisible(false)
         endOutsideDismiss()
     }
 }

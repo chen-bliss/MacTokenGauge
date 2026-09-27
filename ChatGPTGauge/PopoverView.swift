@@ -148,12 +148,12 @@ private struct AccountSection: View {
             } else {
                 let columns = [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)]
                 LazyVGrid(columns: columns, spacing: 10) {
-                    ForEach(account.windows.prefix(4)) { window in
+                    ForEach(account.windows) { window in
                         WindowCard(window: window, now: now)
                     }
                 }
-                if account.windows.contains(where: { $0.remainingPercent <= 0 }) {
-                    let names = account.windows.filter { $0.remainingPercent <= 0 }.map { L10n.windowTitle($0) }.joined(separator: L10n.s(.listSep))
+                if account.windows.contains(where: { $0.detail == nil && $0.remainingPercent <= 0 }) {
+                    let names = account.windows.filter { $0.detail == nil && $0.remainingPercent <= 0 }.map { L10n.windowTitle($0) }.joined(separator: L10n.s(.listSep))
                     Text(L10n.f(.exhausted, names))
                         .font(.caption)
                         .foregroundStyle(gaugeColor(0))
@@ -201,17 +201,26 @@ private struct WindowCard: View {
             ZStack {
                 Circle()
                     .stroke(Color.primary.opacity(0.08), lineWidth: 8)
-                Circle()
-                    .trim(from: 0, to: window.remainingPercent / 100)
-                    .stroke(gaugeColor(window.remainingPercent), style: StrokeStyle(lineWidth: 8, lineCap: .round))
-                    .rotationEffect(.degrees(-90))
+                if window.detail == nil {
+                    Circle()
+                        .trim(from: 0, to: window.remainingPercent / 100)
+                        .stroke(gaugeColor(window.remainingPercent), style: StrokeStyle(lineWidth: 8, lineCap: .round))
+                        .rotationEffect(.degrees(-90))
+                }
                 VStack(spacing: 0) {
-                    Text("\(Int(window.remainingPercent.rounded()))%")
-                        .font(.system(size: 20, weight: .bold, design: .rounded))
-                        .foregroundStyle(gaugeColor(window.remainingPercent))
-                    Text(L10n.s(.remainingWord))
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+                    if let detail = window.detail {
+                        Text(detail)
+                            .font(.system(size: 15, weight: .bold, design: .rounded))
+                            .minimumScaleFactor(0.6)
+                            .lineLimit(1)
+                    } else {
+                        Text("\(Int(window.remainingPercent.rounded()))%")
+                            .font(.system(size: 20, weight: .bold, design: .rounded))
+                            .foregroundStyle(gaugeColor(window.remainingPercent))
+                        Text(L10n.s(.remainingWord))
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
             .frame(width: 84, height: 84)
@@ -229,9 +238,11 @@ private struct WindowCard: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-            Text(L10n.f(.usedLine, Int(window.usedPercent.rounded())))
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
+            if window.detail == nil {
+                Text(L10n.f(.usedLine, Int(window.usedPercent.rounded())))
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
         }
         .padding(.vertical, 10)
         .padding(.horizontal, 6)

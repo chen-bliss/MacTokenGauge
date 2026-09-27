@@ -19,10 +19,13 @@ The downloadable disk image is on the [Releases](https://github.com/chen-bliss/M
 - Hold Command and drag the menu bar icon to place it among other apps. It can sit just to the left of Control Center. It cannot move the clock or Control Center.
 - Click outside the panel, or press Esc, to close it.
 - The app stays in the menu bar and does not keep a Dock icon. Open Settings from the panel. Command-Q closes the settings window and leaves the menu bar icon running. Use Quit in the panel to leave the app.
+- Once ChatGPT’s 5-hour window is used up, the app waits until that window resets before asking the site again. Claude’s 5-hour window works the same way. Cursor keeps the normal interval while Auto or on-demand can still change, and waits for the monthly reset only after those are used up as well.
+- Cursor’s month figure is the included budget. Auto is a separate percent, so the month can read 0% while Auto still has some left. On-demand spend appears in the panel: a percent when it has a cap, or a dollar amount when it does not.
+- The battery check interval is chosen in Settings, from 1 to 30 minutes. While Low Power Mode or a low-battery warning is on, usage checks, the menu bar clock, and battery reads slow down. They return to the intervals you chose when that ends.
 
 ### Install
 
-1. Download `MacTokenGauge-1.1.0.dmg` from Releases.
+1. Download `MacTokenGauge-1.2.0.dmg` from Releases.
 2. Open the disk image.
 3. Drag **MacTokenGauge** into the Applications folder.
 4. Eject the disk image.
@@ -65,7 +68,7 @@ Then open MacTokenGauge as usual.
 If the disk image itself will not open, clear its marker and open it again:
 
 ```bash
-xattr -dr com.apple.quarantine ~/Downloads/MacTokenGauge-1.1.0.dmg
+xattr -dr com.apple.quarantine ~/Downloads/MacTokenGauge-1.2.0.dmg
 ```
 
 ### Privacy
@@ -87,10 +90,13 @@ Open `ChatGPTGauge.xcodeproj` in Xcode, choose My Mac, and run. The product name
 - 按住 Command 再拖动菜单栏图标，可以把它放到其他应用图标之间，最远到控制中心的左边。时钟和控制中心不能被挤开。
 - 点击面板以外的地方，或按 Esc，面板会关闭。
 - 应用只留在菜单栏，不会在程序坞里常驻。设置从弹出的面板里打开。Command-Q 只关闭设置窗口，菜单栏图标继续运行。要退出应用，用面板里的“退出”。
+- ChatGPT 的 5 小时窗口用尽后，会等到这次重置再向官网查询。Claude 的 5 小时窗口同样处理。Cursor 在 Auto 或按量还会变化时仍按原间隔更新，这些也都用尽后才改到月度重置时再查。
+- Cursor 的“本月”是包含额度。Auto 是另一条百分比，所以本月可以显示 0%，同时 Auto 仍有剩余。按量用量会显示在面板里：有上限时是百分比，没有上限时是金额。
+- 电量检查间隔在设置里选择，范围是 1 到 30 分钟。系统开启节能，或出现低电量警告时，用量检查、菜单栏时钟和电量读取都会自动放慢，结束后恢复你设置的间隔。
 
 ### 安装
 
-1. 在 Releases 页面下载 `MacTokenGauge-1.1.0.dmg`。
+1. 在 Releases 页面下载 `MacTokenGauge-1.2.0.dmg`。
 2. 打开这个磁盘映像。
 3. 把 **MacTokenGauge** 拖进“应用程序”文件夹。
 4. 推出磁盘映像。
@@ -133,7 +139,7 @@ xattr -dr com.apple.quarantine /Applications/MacTokenGauge.app
 如果磁盘映像本身打不开，先清掉它的隔离标记，再打开：
 
 ```bash
-xattr -dr com.apple.quarantine ~/Downloads/MacTokenGauge-1.1.0.dmg
+xattr -dr com.apple.quarantine ~/Downloads/MacTokenGauge-1.2.0.dmg
 ```
 
 ### 隐私

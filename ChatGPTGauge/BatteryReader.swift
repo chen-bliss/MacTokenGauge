@@ -2,6 +2,11 @@ import Foundation
 import IOKit.ps
 
 enum BatteryReader {
+    static func isLowBatteryWarning() -> Bool {
+        let level = IOPSGetBatteryWarningLevel()
+        return level == kIOPSLowBatteryWarningEarly || level == kIOPSLowBatteryWarningFinal
+    }
+
     static func current() -> BatteryReading? {
         guard let blob = IOPSCopyPowerSourcesInfo()?.takeRetainedValue() else { return nil }
         guard let sources = IOPSCopyPowerSourcesList(blob)?.takeRetainedValue() as? [CFTypeRef] else { return nil }

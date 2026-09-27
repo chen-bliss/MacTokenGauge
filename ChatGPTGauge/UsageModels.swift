@@ -11,6 +11,8 @@ struct UsageWindow: Equatable, Sendable, Identifiable {
     var usedPercent: Double
     var resetAt: Date?
     var windowSeconds: TimeInterval?
+    /// Shown instead of a remaining percent when this row is an amount, such as uncapped on-demand spend.
+    var detail: String? = nil
 
     var remainingPercent: Double {
         min(100, max(0, 100 - usedPercent))

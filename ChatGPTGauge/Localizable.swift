@@ -53,7 +53,7 @@ enum AppLanguage: String, CaseIterable, Identifiable {
 enum LKey: String {
     case settingsWindow, settings, closeWindow, quit, usage, usageSubtitle, refreshHelp
     case sectionData, liveToggle, liveHelp, refreshInterval, minutesValue
-    case sectionMenu, iconStyle, showBattery, batteryHelp
+    case sectionMenu, iconStyle, showBattery, batteryHelp, batteryInterval, batteryIntervalHelp, powerSaverOn
     case textTemplateLabel, textTemplateHelp, tokenName, tokenPercent, tokenCountdown, tokenWindow, tokenReset
     case batteryChoice, batteryIconOnly, batteryPercentOnly
     case sectionPlace, placeLabel, placeRight, placeLeft, placeFarRight, placeFarLeft, placeHelp
@@ -195,6 +195,9 @@ private let en: [LKey: String] = [
     .iconStyle: "Icon style",
     .showBattery: "Show this Mac’s battery",
     .batteryHelp: "Whenever the menu bar shows the battery, choose the icon or the percent. The panel still shows both.",
+    .batteryInterval: "Battery check",
+    .batteryIntervalHelp: "How often the battery percentage is read.",
+    .powerSaverOn: "Low Power Mode or a low-battery warning is on, so usage checks, the menu bar clock, and battery reads all slow down until it ends.",
     .textTemplateLabel: "Menu bar text",
     .textTemplateHelp: "Type the words yourself. {name} is the account, {percent} is what remains, {countdown} is the time until reset, {window} is the quota name, and {reset} is the clock time. Each account that has a reading uses this same text.",
     .tokenName: "Account",
@@ -358,6 +361,9 @@ private let zh: [LKey: String] = [
     .iconStyle: "图标样式",
     .showBattery: "显示本机电量",
     .batteryHelp: "只要菜单栏显示电量，就可以只显示电池图标，或只显示百分比。面板里仍会同时显示图标和百分比。",
+    .batteryInterval: "电量检查间隔",
+    .batteryIntervalHelp: "多久读取一次电量百分比。",
+    .powerSaverOn: "系统已开启节能，或出现低电量警告。用量检查、菜单栏时钟和电量读取都会自动放慢，结束后恢复你设置的间隔。",
     .textTemplateLabel: "菜单栏文字",
     .textTemplateHelp: "文字可以自己写。{name} 是账号，{percent} 是剩余百分比，{countdown} 是距离重置的时间，{window} 是配额名称，{reset} 是重置的钟点。每个已经读到用量的账号都会套用这段文字。",
     .tokenName: "账号",
@@ -521,6 +527,9 @@ private let fr: [LKey: String] = [
     .iconStyle: "Style d’icône",
     .showBattery: "Afficher la batterie de ce Mac",
     .batteryHelp: "Dès que la barre affiche la batterie, choisissez l’icône ou le pourcentage. Le panneau montre les deux.",
+    .batteryInterval: "Contrôle de la batterie",
+    .batteryIntervalHelp: "Fréquence de lecture du pourcentage de batterie.",
+    .powerSaverOn: "Le mode économie d’énergie ou l’avertissement de batterie faible est actif. Les contrôles d’usage, l’horloge de la barre et la lecture de la batterie ralentissent jusqu’à la fin.",
     .textTemplateLabel: "Texte de la barre",
     .textTemplateHelp: "Écrivez le texte vous-même. {name} est le compte, {percent} le reste, {countdown} le délai avant réinitialisation, {window} le nom du quota, {reset} l’heure. Chaque compte déjà lu reprend ce texte.",
     .tokenName: "Compte",
@@ -684,6 +693,9 @@ private let es: [LKey: String] = [
     .iconStyle: "Estilo del icono",
     .showBattery: "Mostrar la batería de este Mac",
     .batteryHelp: "Siempre que la barra muestre la batería, elija el icono o el porcentaje. El panel muestra ambos.",
+    .batteryInterval: "Revisión de la batería",
+    .batteryIntervalHelp: "Cada cuánto se lee el porcentaje de batería.",
+    .powerSaverOn: "El modo de bajo consumo o el aviso de batería baja está activo. Las consultas de uso, el reloj de la barra y la lectura de la batería van más lentos hasta que termine.",
     .textTemplateLabel: "Texto de la barra",
     .textTemplateHelp: "Escriba el texto usted mismo. {name} es la cuenta, {percent} lo que queda, {countdown} el tiempo hasta el reinicio, {window} el nombre de la cuota y {reset} la hora. Cada cuenta ya leída usa este texto.",
     .tokenName: "Cuenta",
@@ -847,6 +859,9 @@ private let ru: [LKey: String] = [
     .iconStyle: "Вид значка",
     .showBattery: "Показывать батарею этого Mac",
     .batteryHelp: "Когда в строке меню видна батарея, можно показать только значок или только процент. В панели остаются оба.",
+    .batteryInterval: "Проверка батареи",
+    .batteryIntervalHelp: "Как часто читается процент заряда.",
+    .powerSaverOn: "Включён режим энергосбережения или предупреждение о низком заряде. Проверка расхода, часы в строке меню и чтение батареи замедляются, пока это не закончится.",
     .textTemplateLabel: "Текст в строке меню",
     .textTemplateHelp: "Текст можно написать самому. {name} — учётная запись, {percent} — остаток, {countdown} — время до сброса, {window} — название квоты, {reset} — час сброса. Каждая уже прочитанная учётная запись использует этот текст.",
     .tokenName: "Аккаунт",
@@ -1010,6 +1025,9 @@ private let ar: [LKey: String] = [
     .iconStyle: "شكل الأيقونة",
     .showBattery: "إظهار بطارية هذا الجهاز",
     .batteryHelp: "كلما ظهرت البطارية في الشريط، يمكن اختيار الأيقونة أو النسبة فقط. اللوحة تعرض الاثنين.",
+    .batteryInterval: "فحص البطارية",
+    .batteryIntervalHelp: "عدد مرات قراءة نسبة البطارية.",
+    .powerSaverOn: "وضع توفير الطاقة أو تنبيه انخفاض البطارية مفعّل. تتباطأ عمليات فحص الاستخدام وساعة الشريط وقراءة البطارية حتى انتهائه.",
     .textTemplateLabel: "نص شريط القوائم",
     .textTemplateHelp: "يمكن كتابة النص بنفسك. {name} هو الحساب، و{percent} هو المتبقي، و{countdown} هو الوقت حتى إعادة التعيين، و{window} هو اسم الحصة، و{reset} هو وقت الساعة. كل حساب قُرئ استخدامه يستعمل هذا النص.",
     .tokenName: "الحساب",

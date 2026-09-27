@@ -45,6 +45,11 @@ struct SettingsView: View {
                     Text(L10n.f(.minutesValue, Int(monitor.refreshMinutes)))
                         .frame(width: 72, alignment: .trailing)
                 }
+                if monitor.powerSaver {
+                    Text(L10n.s(.powerSaverOn))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
 
             Section(L10n.s(.sectionMenu)) {
@@ -70,6 +75,21 @@ struct SettingsView: View {
                         }
                     }
                     .pickerStyle(.segmented)
+                    LabeledContent(L10n.s(.batteryInterval)) {
+                        Slider(value: $monitor.batteryMinutes, in: 1...30, step: 1) {
+                            Text(L10n.s(.batteryInterval))
+                        } minimumValueLabel: {
+                            Text("1")
+                        } maximumValueLabel: {
+                            Text("30")
+                        }
+                        .frame(width: 180)
+                        Text(L10n.f(.minutesValue, Int(monitor.batteryMinutes)))
+                            .frame(width: 72, alignment: .trailing)
+                    }
+                    Text(L10n.s(.batteryIntervalHelp))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
                 Text(L10n.s(.batteryHelp))
                     .font(.caption)
@@ -120,6 +140,7 @@ struct SettingsView: View {
         .padding(.top, 8)
         .onChange(of: monitor.liveEnabled) { _, _ in monitor.savePreferences() }
         .onChange(of: monitor.refreshMinutes) { _, _ in monitor.savePreferences() }
+        .onChange(of: monitor.batteryMinutes) { _, _ in monitor.savePreferences(scheduleRefresh: false) }
         .onChange(of: monitor.alertsEnabled) { _, _ in monitor.savePreferences() }
         .onChange(of: monitor.alertThreshold) { _, _ in monitor.savePreferences() }
         .onChange(of: monitor.showBattery) { _, _ in

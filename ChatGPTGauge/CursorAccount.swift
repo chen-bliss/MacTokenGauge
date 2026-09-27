@@ -147,16 +147,23 @@ enum CursorUsageClient {
     }
 
     static func fetch(session: CursorAuthReader.Session) async throws -> Parsed {
+        var merged: [UsageWindow] = []
+        var note: String?
         var last: Error = UsageClientError.unrecognized
         for request in requests(for: session) {
             do {
                 let (data, code) = try await send(request)
                 switch code {
                 case 200:
-                    if let parsed = parse(data), !parsed.windows.isEmpty {
-                        return parsed
+                    guard let parsed = parse(data), !parsed.windows.isEmpty else {
+                        last = UsageClientError.unrecognized
+                        continue
                     }
-                    last = UsageClientError.unrecognized
+                    merged = mergeWindows(merged, parsed.windows)
+                    if note == nil { note = parsed.note }
+                    let hasPlan = merged.contains { $0.id == "cursor-total" || $0.id == "cursor-auto" }
+                    let hasOnDemand = merged.contains { $0.id == "cursor-ondemand" }
+                    if hasPlan && hasOnDemand { break }
                 case 401, 403:
                     last = UsageClientError.unauthorized
                 default:
@@ -166,7 +173,23 @@ enum CursorUsageClient {
                 last = error
             }
         }
-        throw last
+        guard !merged.isEmpty else { throw last }
+        return Parsed(windows: ordered(merged), note: note)
+    }
+
+    private static func mergeWindows(_ current: [UsageWindow], _ incoming: [UsageWindow]) -> [UsageWindow] {
+        var merged = current
+        for window in incoming where !merged.contains(where: { $0.id == window.id }) {
+            merged.append(window)
+        }
+        return merged
+    }
+
+    private static func ordered(_ windows: [UsageWindow]) -> [UsageWindow] {
+        let order = ["cursor-total", "cursor-auto", "cursor-api", "cursor-ondemand", "cursor-requests"]
+        return windows.sorted {
+            (order.firstIndex(of: $0.id) ?? 99) < (order.firstIndex(of: $1.id) ?? 99)
+        }
     }
 
     private static func requests(for session: CursorAuthReader.Session) -> [URLRequest] {
@@ -245,6 +268,24 @@ enum CursorUsageClient {
         return (data, http.statusCode)
     }
 
+    static func selfCheck() {
+        let included = Data("""
+        {"displayMessage":"You've used 100% of your included usage","planUsage":{"includedSpend":2000,"remaining":0,"limit":2000,"autoPercentUsed":35,"apiPercentUsed":100},"spendLimitUsage":{"individualUsed":800,"individualLimit":5000}}
+        """.utf8)
+        let parsed = parse(included)
+        precondition(parsed?.windows.first { $0.id == "cursor-total" }?.usedPercent == 100)
+        precondition(parsed?.windows.first { $0.id == "cursor-auto" }?.usedPercent == 35)
+        let capped = parsed?.windows.first { $0.id == "cursor-ondemand" }
+        precondition(capped?.detail == nil)
+        precondition(abs((capped?.usedPercent ?? -1) - 16) < 0.01)
+
+        let open = Data("""
+        {"individualUsage":{"plan":{"used":10,"limit":100,"remaining":90,"autoPercentUsed":4},"onDemand":{"enabled":true,"used":2309,"limit":null}}}
+        """.utf8)
+        let extra = parse(open)?.windows.first { $0.id == "cursor-ondemand" }
+        precondition(extra?.detail == "$23.09")
+    }
+
     static func parse(_ data: Data) -> Parsed? {
         guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
         let plan = planDictionary(in: json)
@@ -254,7 +295,9 @@ enum CursorUsageClient {
         var windows: [UsageWindow] = []
 
         if let plan {
-            if let used = includedUsedPercent(plan) {
+            if let message = json["displayMessage"] as? String, let used = percent(in: message) {
+                windows.append(window(id: "cursor-total", title: "本月", used: used, resetAt: resetAt, windowSeconds: windowSeconds))
+            } else if let used = includedUsedPercent(plan) {
                 windows.append(window(id: "cursor-total", title: "本月", used: used, resetAt: resetAt, windowSeconds: windowSeconds))
             } else if let total = JSONValues.number(plan["totalPercentUsed"]) {
                 windows.append(window(id: "cursor-total", title: "本月", used: total, resetAt: resetAt, windowSeconds: windowSeconds))
@@ -283,12 +326,7 @@ enum CursorUsageClient {
             windows.append(window(id: "cursor-api", title: "API", used: used, resetAt: resetAt, windowSeconds: windowSeconds))
         }
 
-        if let onDemand = onDemandDictionary(in: json),
-           let used = JSONValues.number(onDemand["used"]),
-           let limit = JSONValues.number(onDemand["limit"]),
-           limit > 0 {
-            windows.append(window(id: "cursor-ondemand", title: "按量", used: used / limit * 100, resetAt: resetAt, windowSeconds: windowSeconds))
-        }
+        appendOnDemand(json, to: &windows, resetAt: resetAt, windowSeconds: windowSeconds)
 
         let legacyModel = (json["gpt-4"] as? [String: Any]) ?? (plan?["gpt-4"] as? [String: Any])
         if !windows.contains(where: { $0.id == "cursor-total" || $0.id == "cursor-requests" }),
@@ -326,16 +364,51 @@ enum CursorUsageClient {
         return nil
     }
 
-    /// Cursor 面板上的“已用百分之多少”是包含额度花费除以上限，不是 totalPercentUsed。
+    /// The sentence on Cursor's dashboard is included spend against the limit.
+    /// `totalPercentUsed` is a different meter and can stay low after that budget is gone.
+    /// `remaining` wins when it is present, so a leftover included budget is not shown as empty.
     private static func includedUsedPercent(_ plan: [String: Any]) -> Double? {
         guard let limit = JSONValues.number(plan["limit"]), limit > 0 else { return nil }
-        if let included = JSONValues.number(plan["includedSpend"]) ?? JSONValues.number(plan["used"]) {
-            return min(100, max(0, included / limit * 100))
-        }
         if let remaining = JSONValues.number(plan["remaining"]) {
             return min(100, max(0, (limit - remaining) / limit * 100))
         }
+        if let included = JSONValues.number(plan["includedSpend"]) ?? JSONValues.number(plan["used"]) {
+            return min(100, max(0, included / limit * 100))
+        }
         return nil
+    }
+
+    private static func appendOnDemand(_ json: [String: Any], to windows: inout [UsageWindow], resetAt: Date?, windowSeconds: TimeInterval?) {
+        guard !windows.contains(where: { $0.id == "cursor-ondemand" }) else { return }
+        if let spend = spendLimitDictionary(in: json) {
+            let used = JSONValues.number(spend["individualUsed"] ?? spend["pooledUsed"] ?? spend["used"])
+            let limit = JSONValues.number(spend["individualLimit"] ?? spend["pooledLimit"] ?? spend["limit"])
+            if let window = onDemandWindow(used: used, limit: limit, resetAt: resetAt, windowSeconds: windowSeconds) {
+                windows.append(window)
+                return
+            }
+        }
+        guard let onDemand = onDemandDictionary(in: json) else { return }
+        if let enabled = onDemand["enabled"] as? Bool, !enabled { return }
+        let used = JSONValues.number(onDemand["used"])
+        let limit = JSONValues.number(onDemand["limit"])
+        if let window = onDemandWindow(used: used, limit: limit, resetAt: resetAt, windowSeconds: windowSeconds) {
+            windows.append(window)
+        }
+    }
+
+    private static func onDemandWindow(used: Double?, limit: Double?, resetAt: Date?, windowSeconds: TimeInterval?) -> UsageWindow? {
+        guard let used, used > 0 || (limit ?? 0) > 0 else { return nil }
+        if let limit, limit > 0 {
+            return window(id: "cursor-ondemand", title: "按量", used: used / limit * 100, resetAt: resetAt, windowSeconds: windowSeconds)
+        }
+        var open = window(id: "cursor-ondemand", title: "按量", used: 0, resetAt: resetAt, windowSeconds: windowSeconds)
+        open.detail = "$\(money(used))"
+        return open
+    }
+
+    private static func spendLimitDictionary(in json: [String: Any]) -> [String: Any]? {
+        json["spendLimitUsage"] as? [String: Any]
     }
 
     private static func percent(in text: String) -> Double? {

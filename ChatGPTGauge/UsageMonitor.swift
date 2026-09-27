@@ -11,6 +11,8 @@ final class UsageMonitor: ObservableObject {
     @Published var isRefreshing = false
     @Published var liveEnabled: Bool
     @Published var refreshMinutes: Double
+    @Published var batteryMinutes: Double
+    @Published private(set) var powerSaver = false
     @Published var alertsEnabled: Bool
     @Published var alertThreshold: Double
     @Published var showBattery: Bool
@@ -60,14 +62,19 @@ final class UsageMonitor: ObservableObject {
     }
 
     private var started = false
-    private var timer: Timer?
+    private var clockTimer: Timer?
+    private var batteryTimer: Timer?
+    private var refreshTimer: Timer?
     private var reloadTask: Task<Void, Never>?
-    private var secondsUntilLive = 0
+    private var popoverVisible = false
+    private var askedForAlerts = false
+    private var powerObserver: NSObjectProtocol?
 
     init() {
         let defaults = UserDefaults.standard
         liveEnabled = defaults.object(forKey: Keys.liveEnabled) as? Bool ?? true
         refreshMinutes = defaults.object(forKey: Keys.refreshMinutes) as? Double ?? 5
+        batteryMinutes = defaults.object(forKey: Keys.batteryMinutes) as? Double ?? 2
         alertsEnabled = defaults.object(forKey: Keys.alertsEnabled) as? Bool ?? true
         alertThreshold = defaults.object(forKey: Keys.alertThreshold) as? Double ?? 20
         showBattery = defaults.object(forKey: Keys.showBattery) as? Bool ?? true
@@ -96,18 +103,29 @@ final class UsageMonitor: ObservableObject {
         started = true
         #if DEBUG
         UsageParser.selfCheck()
+        CursorUsageClient.selfCheck()
         #endif
-        secondsUntilLive = liveInterval
         battery = BatteryReader.current()
+        refreshPowerSaver(reschedule: false)
         reload(userInitiated: false)
-        let timer = Timer(timeInterval: 30, repeats: true) { [weak self] _ in
+        scheduleClock()
+        scheduleBattery()
+        powerObserver = NotificationCenter.default.addObserver(
+            forName: .NSProcessInfoPowerStateDidChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
             MainActor.assumeIsolated {
-                self?.tick()
+                self?.refreshPowerSaver()
             }
         }
-        timer.tolerance = 15
-        RunLoop.main.add(timer, forMode: .common)
-        self.timer = timer
+    }
+
+    func setPopoverVisible(_ visible: Bool) {
+        guard popoverVisible != visible else { return }
+        popoverVisible = visible
+        if visible { now = Date() }
+        scheduleClock()
     }
 
     func reload(userInitiated: Bool) {
@@ -119,6 +137,7 @@ final class UsageMonitor: ObservableObject {
         let defaults = UserDefaults.standard
         defaults.set(liveEnabled, forKey: Keys.liveEnabled)
         defaults.set(refreshMinutes, forKey: Keys.refreshMinutes)
+        defaults.set(batteryMinutes, forKey: Keys.batteryMinutes)
         defaults.set(alertsEnabled, forKey: Keys.alertsEnabled)
         defaults.set(alertThreshold, forKey: Keys.alertThreshold)
         defaults.set(showBattery, forKey: Keys.showBattery)
@@ -130,7 +149,9 @@ final class UsageMonitor: ObservableObject {
         if let data = try? JSONEncoder().encode(barSlots) {
             defaults.set(data, forKey: Keys.barSlots)
         }
-        if scheduleRefresh { secondsUntilLive = 0 }
+        scheduleClock()
+        scheduleBattery()
+        if scheduleRefresh { reload(userInitiated: false) }
     }
 
     func updateSlotTarget(_ id: UUID, target: String) {
@@ -167,63 +188,190 @@ final class UsageMonitor: ObservableObject {
         savePreferences()
     }
 
-    private func tick() {
-        let next = Date()
-        if Calendar.current.compare(now, to: next, toGranularity: .minute) != .orderedSame {
-            now = next
+    private var clockNeeded: Bool {
+        popoverVisible || menuBarStyle == .text
+    }
+
+    private func scheduleBattery() {
+        batteryTimer?.invalidate()
+        batteryTimer = nil
+        guard showBattery || menuBarStyle == .battery else { return }
+        let interval = batteryCheckInterval
+        let timer = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.tickBattery() }
         }
-        if showBattery {
-            let reading = BatteryReader.current()
-            if reading != battery {
-                battery = reading
+        timer.tolerance = powerSaver ? min(180, interval * 0.3) : min(60, interval * 0.5)
+        RunLoop.main.add(timer, forMode: .common)
+        batteryTimer = timer
+    }
+
+    private func tickBattery() {
+        refreshPowerSaver()
+        guard showBattery || menuBarStyle == .battery else { return }
+        let reading = BatteryReader.current()
+        guard reading != battery else { return }
+        battery = reading
+    }
+
+    private var batteryCheckInterval: TimeInterval {
+        let chosen = max(60, batteryMinutes * 60)
+        guard powerSaver else { return chosen }
+        return max(chosen * 3, 10 * 60)
+    }
+
+    private func scheduleClock() {
+        clockTimer?.invalidate()
+        clockTimer = nil
+        guard clockNeeded else { return }
+        let interval = clockInterval
+        let fire: Date
+        if powerSaver {
+            fire = Date().addingTimeInterval(interval)
+        } else {
+            let now = Date()
+            fire = Calendar.current.nextDate(
+                after: now,
+                matching: DateComponents(second: 0),
+                matchingPolicy: .nextTime
+            ) ?? now.addingTimeInterval(interval)
+        }
+        let timer = Timer(fire: fire, interval: interval, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.tickClock() }
+        }
+        timer.tolerance = powerSaver ? min(120, interval * 0.3) : (popoverVisible ? 5 : 30)
+        RunLoop.main.add(timer, forMode: .common)
+        clockTimer = timer
+    }
+
+    private var clockInterval: TimeInterval {
+        guard powerSaver else { return 60 }
+        return popoverVisible ? 120 : 300
+    }
+
+    private func refreshPowerSaver(reschedule: Bool = true) {
+        let active = ProcessInfo.processInfo.isLowPowerModeEnabled || BatteryReader.isLowBatteryWarning()
+        guard active != powerSaver else { return }
+        powerSaver = active
+        guard reschedule else { return }
+        scheduleClock()
+        scheduleBattery()
+        scheduleRefresh()
+    }
+
+    private func tickClock() {
+        refreshPowerSaver()
+        let next = Date()
+        guard Calendar.current.compare(now, to: next, toGranularity: .minute) != .orderedSame else { return }
+        now = next
+    }
+
+    private func scheduleRefresh() {
+        refreshTimer?.invalidate()
+        let delay = nextRefreshDelay()
+        let timer = Timer(fire: Date().addingTimeInterval(delay), interval: 0, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.reload(userInitiated: false)
             }
         }
-        secondsUntilLive -= 30
-        if secondsUntilLive <= 0 {
-            secondsUntilLive = liveInterval
-            reloadTask?.cancel()
-            reloadTask = Task { await performReload(includeLive: liveEnabled, userInitiated: false) }
+        timer.tolerance = min(180, max(20, delay * 0.02))
+        RunLoop.main.add(timer, forMode: .common)
+        refreshTimer = timer
+    }
+
+    private func nextRefreshDelay(now: Date = Date()) -> TimeInterval {
+        let interval = TimeInterval(liveInterval)
+        var delays: [TimeInterval] = []
+        for id in ["chatgpt", "cursor", "claude"] {
+            if id != "chatgpt", !liveEnabled { continue }
+            guard let account = accounts.first(where: { $0.id == id }) else {
+                delays.append(interval)
+                continue
+            }
+            if let resume = Self.resumeAt(account, now: now), resume > now {
+                delays.append(resume.timeIntervalSince(now))
+            } else {
+                delays.append(interval)
+            }
         }
+        return min(max(delays.min() ?? interval, 30), 24 * 60 * 60)
+    }
+
+    /// When the window that actually blocks more use is empty, wait until it resets
+    /// instead of polling the network on the normal interval.
+    private static func resumeAt(_ account: ProviderAccount, now: Date) -> Date? {
+        let gates = gatingWindows(account)
+        guard !gates.isEmpty, gates.allSatisfy({ $0.remainingPercent <= 0.5 }) else { return nil }
+        guard gates.allSatisfy({ $0.resetAt != nil }) else { return nil }
+        let future = gates.compactMap(\.resetAt).filter { $0 > now }
+        guard let earliest = future.min() else { return nil }
+        return earliest.addingTimeInterval(20)
+    }
+
+    private static func gatingWindows(_ account: ProviderAccount) -> [UsageWindow] {
+        switch account.id {
+        case "chatgpt":
+            return account.windows.filter { $0.id == "primary" }
+        case "claude":
+            return account.windows.filter { $0.id == "five_hour" }
+        case "cursor":
+            if let extra = account.windows.first(where: { $0.id == "cursor-ondemand" }),
+               extra.detail != nil || extra.remainingPercent > 0.5 {
+                return []
+            }
+            return account.windows.filter { ["cursor-total", "cursor-auto", "cursor-api"].contains($0.id) }
+        default:
+            return []
+        }
+    }
+
+    private static func loadIfNeeded(_ needed: Bool, _ load: () async -> ProviderAccount) async -> ProviderAccount? {
+        guard needed else { return nil }
+        return await load()
+    }
+
+    private func shouldFetch(_ id: String, userInitiated: Bool, now: Date) -> Bool {
+        if userInitiated { return true }
+        if id != "chatgpt", !liveEnabled { return false }
+        guard let account = accounts.first(where: { $0.id == id }), !account.windows.isEmpty else { return true }
+        if let resume = Self.resumeAt(account, now: now) {
+            return resume <= now
+        }
+        return true
     }
 
     private var liveInterval: Int {
-        max(60, Int(refreshMinutes * 60))
+        let chosen = max(60, Int(refreshMinutes * 60))
+        guard powerSaver else { return chosen }
+        return max(chosen * 3, 15 * 60)
     }
 
     private func performReload(includeLive: Bool, userInitiated: Bool) async {
+        refreshPowerSaver()
         if userInitiated { isRefreshing = true }
         defer { if userInitiated { isRefreshing = false } }
 
-        let chat: ProviderAccount
-        let cursor: ProviderAccount?
-        let claude: ProviderAccount?
-        async let chatTask = ChatGPTAccountLoader.load(includeLive: true)
-        if includeLive {
-            async let cursorTask = CursorAccountLoader.load()
-            async let claudeTask = ClaudeAccountLoader.load()
-            chat = await chatTask
-            cursor = await cursorTask
-            claude = await claudeTask
-        } else {
-            chat = await chatTask
-            cursor = nil
-            claude = nil
-        }
+        let moment = Date()
+        let fetchChat = shouldFetch("chatgpt", userInitiated: userInitiated, now: moment)
+        let fetchCursor = includeLive && shouldFetch("cursor", userInitiated: userInitiated, now: moment)
+        let fetchClaude = includeLive && shouldFetch("claude", userInitiated: userInitiated, now: moment)
+
+        async let chatTask = Self.loadIfNeeded(fetchChat) { await ChatGPTAccountLoader.load(includeLive: true) }
+        async let cursorTask = Self.loadIfNeeded(fetchCursor) { await CursorAccountLoader.load() }
+        async let claudeTask = Self.loadIfNeeded(fetchClaude) { await ClaudeAccountLoader.load() }
+        let chat = await chatTask
+        let cursor = await cursorTask
+        let claude = await claudeTask
         if Task.isCancelled { return }
 
         var next = accounts
-        merge(chat, into: &next)
+        if let chat { merge(chat, into: &next) }
         if let cursor { merge(cursor, into: &next) }
         if let claude { merge(claude, into: &next) }
         accounts = next
-        if !chat.windows.isEmpty { considerAlerts(for: chat) }
+        if let chat, !chat.windows.isEmpty { considerAlerts(for: chat) }
         if let cursor, !cursor.windows.isEmpty { considerAlerts(for: cursor) }
         if let claude, !claude.windows.isEmpty { considerAlerts(for: claude) }
-        battery = BatteryReader.current()
-
-        if userInitiated {
-            secondsUntilLive = liveInterval
-        }
+        scheduleRefresh()
     }
 
     private func merge(_ fresh: ProviderAccount, into list: inout [ProviderAccount]) {
@@ -245,7 +393,10 @@ final class UsageMonitor: ObservableObject {
 
     private func considerAlerts(for account: ProviderAccount) {
         guard alertsEnabled else { return }
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
+        if !askedForAlerts {
+            askedForAlerts = true
+            UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
+        }
 
         var stored: [String: Double] = [:]
         if let raw = UserDefaults.standard.dictionary(forKey: Keys.alertedReset) {
@@ -290,6 +441,7 @@ final class UsageMonitor: ObservableObject {
     private enum Keys {
         static let liveEnabled = "liveEnabled"
         static let refreshMinutes = "refreshMinutes"
+        static let batteryMinutes = "batteryMinutes"
         static let alertsEnabled = "alertsEnabled"
         static let alertThreshold = "alertThreshold"
         static let alertedReset = "alertedReset"
