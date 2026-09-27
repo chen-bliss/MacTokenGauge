@@ -45,6 +45,10 @@ struct SettingsView: View {
                     Text(L10n.f(.minutesValue, Int(monitor.refreshMinutes)))
                         .frame(width: 72, alignment: .trailing)
                 }
+                Toggle(L10n.s(.refreshOnWake), isOn: $monitor.refreshOnWake)
+                Text(L10n.s(.refreshOnWakeHelp))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 if monitor.powerSaver {
                     Text(L10n.s(.powerSaverOn))
                         .font(.caption)
@@ -140,6 +144,7 @@ struct SettingsView: View {
         .padding(.top, 8)
         .onChange(of: monitor.liveEnabled) { _, _ in monitor.savePreferences() }
         .onChange(of: monitor.refreshMinutes) { _, _ in monitor.savePreferences() }
+        .onChange(of: monitor.refreshOnWake) { _, _ in monitor.savePreferences(scheduleRefresh: false) }
         .onChange(of: monitor.batteryMinutes) { _, _ in monitor.savePreferences(scheduleRefresh: false) }
         .onChange(of: monitor.alertsEnabled) { _, _ in monitor.savePreferences() }
         .onChange(of: monitor.alertThreshold) { _, _ in monitor.savePreferences() }

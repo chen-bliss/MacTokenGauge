@@ -52,7 +52,7 @@ enum AppLanguage: String, CaseIterable, Identifiable {
 
 enum LKey: String {
     case settingsWindow, settings, closeWindow, quit, usage, usageSubtitle, refreshHelp
-    case sectionData, liveToggle, liveHelp, refreshInterval, minutesValue
+    case sectionData, liveToggle, liveHelp, refreshInterval, refreshOnWake, refreshOnWakeHelp, minutesValue
     case sectionMenu, iconStyle, showBattery, batteryHelp, batteryInterval, batteryIntervalHelp, powerSaverOn
     case textTemplateLabel, textTemplateHelp, tokenName, tokenPercent, tokenCountdown, tokenWindow, tokenReset
     case batteryChoice, batteryIconOnly, batteryPercentOnly
@@ -190,6 +190,8 @@ private let en: [LKey: String] = [
     .liveToggle: "Read official usage",
     .liveHelp: "ChatGPT reads the official site on this interval and keeps that reading. Local records appear only before the site has returned a number. The switch still controls Cursor and Claude.",
     .refreshInterval: "Refresh interval",
+    .refreshOnWake: "Refresh when the screen turns on",
+    .refreshOnWakeHelp: "Also refresh usage when the screen turns on, including when the lid is opened. Launching the app always refreshes once, whether this is on or off.",
     .minutesValue: "%d min",
     .sectionMenu: "Menu bar",
     .iconStyle: "Icon style",
@@ -356,6 +358,8 @@ private let zh: [LKey: String] = [
     .liveToggle: "读取官方用量",
     .liveHelp: "ChatGPT 会按这个间隔连接官网，并一直保留官网读到的数字。只有官网还没有返回过用量时，才暂时显示本机记录。上面的开关仍然控制 Cursor 和 Claude。",
     .refreshInterval: "刷新间隔",
+    .refreshOnWake: "亮屏时刷新",
+    .refreshOnWakeHelp: "屏幕点亮时再查一次用量，包括打开笔记本盖子。每次启动应用都会刷新一次，不受这个开关影响。",
     .minutesValue: "%d 分钟",
     .sectionMenu: "菜单栏",
     .iconStyle: "图标样式",
@@ -522,6 +526,8 @@ private let fr: [LKey: String] = [
     .liveToggle: "Lire la consommation officielle",
     .liveHelp: "ChatGPT interroge le site officiel à cet intervalle et conserve ce chiffre. Les enregistrements locaux n’apparaissent que tant que le site n’a encore rien renvoyé. L’interrupteur concerne toujours Cursor et Claude.",
     .refreshInterval: "Intervalle",
+    .refreshOnWake: "Actualiser à l’allumage de l’écran",
+    .refreshOnWakeHelp: "Relance aussi une lecture quand l’écran s’allume, y compris à l’ouverture du capot. Le lancement de l’app actualise toujours une fois, que ce réglage soit activé ou non.",
     .minutesValue: "%d min",
     .sectionMenu: "Barre des menus",
     .iconStyle: "Style d’icône",
@@ -688,6 +694,8 @@ private let es: [LKey: String] = [
     .liveToggle: "Leer el uso oficial",
     .liveHelp: "ChatGPT consulta el sitio oficial en este intervalo y conserva esa cifra. Los registros locales solo aparecen antes de que el sitio haya devuelto un número. El interruptor sigue controlando Cursor y Claude.",
     .refreshInterval: "Intervalo",
+    .refreshOnWake: "Actualizar al encender la pantalla",
+    .refreshOnWakeHelp: "También consulta el uso cuando la pantalla se enciende, incluso al abrir la tapa. Al abrir la app siempre hay una consulta, esté o no activado.",
     .minutesValue: "%d min",
     .sectionMenu: "Barra de menús",
     .iconStyle: "Estilo del icono",
@@ -854,6 +862,8 @@ private let ru: [LKey: String] = [
     .liveToggle: "Читать официальный расход",
     .liveHelp: "ChatGPT с этим интервалом читает официальный сайт и сохраняет эту цифру. Локальные записи видны только пока сайт ещё ничего не вернул. Переключатель по-прежнему управляет Cursor и Claude.",
     .refreshInterval: "Интервал",
+    .refreshOnWake: "Обновлять при включении экрана",
+    .refreshOnWakeHelp: "Также запрашивает расход, когда экран включается, в том числе при открытии крышки. При запуске приложения запрос выполняется всегда, независимо от этого переключателя.",
     .minutesValue: "%d мин",
     .sectionMenu: "Строка меню",
     .iconStyle: "Вид значка",
@@ -1020,6 +1030,8 @@ private let ar: [LKey: String] = [
     .liveToggle: "قراءة الاستخدام الرسمي",
     .liveHelp: "يتصل ChatGPT بالموقع الرسمي حسب هذه الفترة ويحتفظ بالرقم الذي يصله. لا تظهر السجلات المحلية إلا قبل أن يعيد الموقع أي قراءة. المفتاح ما زال يتحكم في Cursor وClaude.",
     .refreshInterval: "فترة التحديث",
+    .refreshOnWake: "التحديث عند إضاءة الشاشة",
+    .refreshOnWakeHelp: "يعيد جلب الاستخدام أيضاً عند إضاءة الشاشة، بما في ذلك فتح غطاء الجهاز. تشغيل التطبيق يجلب البيانات مرة دائماً، سواء كان هذا الخيار مفتوحاً أو مغلقاً.",
     .minutesValue: "%d د",
     .sectionMenu: "شريط القوائم",
     .iconStyle: "شكل الأيقونة",

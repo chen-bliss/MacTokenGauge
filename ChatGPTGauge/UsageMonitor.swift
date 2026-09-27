@@ -11,6 +11,7 @@ final class UsageMonitor: ObservableObject {
     @Published var isRefreshing = false
     @Published var liveEnabled: Bool
     @Published var refreshMinutes: Double
+    @Published var refreshOnWake: Bool
     @Published var batteryMinutes: Double
     @Published private(set) var powerSaver = false
     @Published var alertsEnabled: Bool
@@ -69,11 +70,14 @@ final class UsageMonitor: ObservableObject {
     private var popoverVisible = false
     private var askedForAlerts = false
     private var powerObserver: NSObjectProtocol?
+    private var wakeObservers: [NSObjectProtocol] = []
+    private var lastWakeRefresh = Date.distantPast
 
     init() {
         let defaults = UserDefaults.standard
         liveEnabled = defaults.object(forKey: Keys.liveEnabled) as? Bool ?? true
         refreshMinutes = defaults.object(forKey: Keys.refreshMinutes) as? Double ?? 5
+        refreshOnWake = defaults.object(forKey: Keys.refreshOnWake) as? Bool ?? true
         batteryMinutes = defaults.object(forKey: Keys.batteryMinutes) as? Double ?? 2
         alertsEnabled = defaults.object(forKey: Keys.alertsEnabled) as? Bool ?? true
         alertThreshold = defaults.object(forKey: Keys.alertThreshold) as? Double ?? 20
@@ -119,6 +123,29 @@ final class UsageMonitor: ObservableObject {
                 self?.refreshPowerSaver()
             }
         }
+        observeScreenWake()
+        lastWakeRefresh = Date()
+    }
+
+    /// Launch always loads usage once. This switch only adds a refresh when the screen turns on later.
+    private func observeScreenWake() {
+        let center = NSWorkspace.shared.notificationCenter
+        let names = [NSWorkspace.didWakeNotification, NSWorkspace.screensDidWakeNotification]
+        wakeObservers = names.map { name in
+            center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    self?.refreshAfterScreenWake()
+                }
+            }
+        }
+    }
+
+    private func refreshAfterScreenWake() {
+        guard refreshOnWake else { return }
+        let moment = Date()
+        guard moment.timeIntervalSince(lastWakeRefresh) > 3 else { return }
+        lastWakeRefresh = moment
+        reload(userInitiated: false, ignorePause: true)
     }
 
     func setPopoverVisible(_ visible: Bool) {
@@ -128,15 +155,16 @@ final class UsageMonitor: ObservableObject {
         scheduleClock()
     }
 
-    func reload(userInitiated: Bool) {
+    func reload(userInitiated: Bool, ignorePause: Bool = false) {
         reloadTask?.cancel()
-        reloadTask = Task { await performReload(includeLive: liveEnabled, userInitiated: userInitiated) }
+        reloadTask = Task { await performReload(includeLive: liveEnabled, userInitiated: userInitiated, ignorePause: ignorePause) }
     }
 
     func savePreferences(scheduleRefresh: Bool = true) {
         let defaults = UserDefaults.standard
         defaults.set(liveEnabled, forKey: Keys.liveEnabled)
         defaults.set(refreshMinutes, forKey: Keys.refreshMinutes)
+        defaults.set(refreshOnWake, forKey: Keys.refreshOnWake)
         defaults.set(batteryMinutes, forKey: Keys.batteryMinutes)
         defaults.set(alertsEnabled, forKey: Keys.alertsEnabled)
         defaults.set(alertThreshold, forKey: Keys.alertThreshold)
@@ -329,8 +357,8 @@ final class UsageMonitor: ObservableObject {
         return await load()
     }
 
-    private func shouldFetch(_ id: String, userInitiated: Bool, now: Date) -> Bool {
-        if userInitiated { return true }
+    private func shouldFetch(_ id: String, userInitiated: Bool, ignorePause: Bool, now: Date) -> Bool {
+        if userInitiated || ignorePause { return true }
         if id != "chatgpt", !liveEnabled { return false }
         guard let account = accounts.first(where: { $0.id == id }), !account.windows.isEmpty else { return true }
         if let resume = Self.resumeAt(account, now: now) {
@@ -345,15 +373,15 @@ final class UsageMonitor: ObservableObject {
         return max(chosen * 3, 15 * 60)
     }
 
-    private func performReload(includeLive: Bool, userInitiated: Bool) async {
+    private func performReload(includeLive: Bool, userInitiated: Bool, ignorePause: Bool) async {
         refreshPowerSaver()
         if userInitiated { isRefreshing = true }
         defer { if userInitiated { isRefreshing = false } }
 
         let moment = Date()
-        let fetchChat = shouldFetch("chatgpt", userInitiated: userInitiated, now: moment)
-        let fetchCursor = includeLive && shouldFetch("cursor", userInitiated: userInitiated, now: moment)
-        let fetchClaude = includeLive && shouldFetch("claude", userInitiated: userInitiated, now: moment)
+        let fetchChat = shouldFetch("chatgpt", userInitiated: userInitiated, ignorePause: ignorePause, now: moment)
+        let fetchCursor = includeLive && shouldFetch("cursor", userInitiated: userInitiated, ignorePause: ignorePause, now: moment)
+        let fetchClaude = includeLive && shouldFetch("claude", userInitiated: userInitiated, ignorePause: ignorePause, now: moment)
 
         async let chatTask = Self.loadIfNeeded(fetchChat) { await ChatGPTAccountLoader.load(includeLive: true) }
         async let cursorTask = Self.loadIfNeeded(fetchCursor) { await CursorAccountLoader.load() }
@@ -441,6 +469,7 @@ final class UsageMonitor: ObservableObject {
     private enum Keys {
         static let liveEnabled = "liveEnabled"
         static let refreshMinutes = "refreshMinutes"
+        static let refreshOnWake = "refreshOnWake"
         static let batteryMinutes = "batteryMinutes"
         static let alertsEnabled = "alertsEnabled"
         static let alertThreshold = "alertThreshold"
