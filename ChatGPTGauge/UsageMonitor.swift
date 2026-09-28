@@ -70,6 +70,7 @@ final class UsageMonitor: ObservableObject {
     private var reloadTask: Task<Void, Never>?
     private var popoverVisible = false
     private var askedForAlerts = false
+    private let notificationPoster = UsageNotificationDelegate()
     private var powerObserver: NSObjectProtocol?
     private var screenWake: ScreenWakeHub?
     private var lastWakeRefresh = Date.distantPast
@@ -109,7 +110,9 @@ final class UsageMonitor: ObservableObject {
         #if DEBUG
         UsageParser.selfCheck()
         CursorUsageClient.selfCheck()
+        Self.selfCheckAlerts()
         #endif
+        UNUserNotificationCenter.current().delegate = notificationPoster
         battery = BatteryReader.current()
         refreshPowerSaver(reschedule: false)
         reload(userInitiated: false)
@@ -393,9 +396,9 @@ final class UsageMonitor: ObservableObject {
         if let cursor { merge(cursor, into: &next) }
         if let claude { merge(claude, into: &next) }
         accounts = next
-        if let chat, !chat.windows.isEmpty { considerAlerts(for: chat) }
-        if let cursor, !cursor.windows.isEmpty { considerAlerts(for: cursor) }
-        if let claude, !claude.windows.isEmpty { considerAlerts(for: claude) }
+        if let chat, !chat.windows.isEmpty { await considerAlerts(for: chat) }
+        if let cursor, !cursor.windows.isEmpty { await considerAlerts(for: cursor) }
+        if let claude, !claude.windows.isEmpty { await considerAlerts(for: claude) }
         scheduleRefresh()
     }
 
@@ -416,15 +419,31 @@ final class UsageMonitor: ObservableObject {
         list[index] = fresh
     }
 
-    private func considerAlerts(for account: ProviderAccount) {
+    /// Alert only while some quota is still left. A window that is already used up
+    /// does not need a reminder, and an uncapped spend row is not a percent.
+    static func wantsUsageAlert(remaining: Double, threshold: Double, hasAmountDetail: Bool, alreadyAlerted: Bool) -> Bool {
+        if hasAmountDetail || alreadyAlerted { return false }
+        if remaining <= 0.5 { return false }
+        return remaining <= threshold
+    }
+
+    private static func selfCheckAlerts() {
+        precondition(wantsUsageAlert(remaining: 15, threshold: 20, hasAmountDetail: false, alreadyAlerted: false))
+        precondition(!wantsUsageAlert(remaining: 0, threshold: 20, hasAmountDetail: false, alreadyAlerted: false))
+        precondition(!wantsUsageAlert(remaining: 0.4, threshold: 20, hasAmountDetail: false, alreadyAlerted: false))
+        precondition(!wantsUsageAlert(remaining: 40, threshold: 20, hasAmountDetail: false, alreadyAlerted: false))
+        precondition(!wantsUsageAlert(remaining: 15, threshold: 20, hasAmountDetail: false, alreadyAlerted: true))
+        precondition(!wantsUsageAlert(remaining: 8, threshold: 20, hasAmountDetail: true, alreadyAlerted: false))
+        precondition(wantsUsageAlert(remaining: 5, threshold: 5, hasAmountDetail: false, alreadyAlerted: false))
+        precondition(!wantsUsageAlert(remaining: 21, threshold: 20, hasAmountDetail: false, alreadyAlerted: false))
+    }
+
+    private func considerAlerts(for account: ProviderAccount) async {
         guard alertsEnabled else { return }
-        if !askedForAlerts {
-            askedForAlerts = true
-            UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
-        }
+        guard await notificationsAllowed() else { return }
 
         var stored: [String: Double] = [:]
-        if let raw = UserDefaults.standard.dictionary(forKey: Keys.alertedReset) {
+        if let raw = UserDefaults.standard.dictionary(forKey: Keys.alertedCycle) {
             for (key, value) in raw {
                 if let number = value as? NSNumber {
                     stored[key] = number.doubleValue
@@ -439,9 +458,13 @@ final class UsageMonitor: ObservableObject {
                 if stored.removeValue(forKey: key) != nil { changed = true }
                 continue
             }
-            guard stored[key] != resetKey else { continue }
-            stored[key] = resetKey
-            changed = true
+            let already = stored[key] == resetKey
+            guard Self.wantsUsageAlert(
+                remaining: window.remainingPercent,
+                threshold: alertThreshold,
+                hasAmountDetail: window.detail != nil,
+                alreadyAlerted: already
+            ) else { continue }
             let content = UNMutableNotificationContent()
             let title = L10n.windowTitle(window)
             content.title = L10n.f(.alertTitle, account.name)
@@ -456,10 +479,52 @@ final class UsageMonitor: ObservableObject {
                 content: content,
                 trigger: nil
             )
-            UNUserNotificationCenter.current().add(request)
+            guard await deliver(request) else { continue }
+            stored[key] = resetKey
+            changed = true
         }
         if changed {
-            UserDefaults.standard.set(stored, forKey: Keys.alertedReset)
+            UserDefaults.standard.set(stored, forKey: Keys.alertedCycle)
+        }
+    }
+
+    private func notificationsAllowed() async -> Bool {
+        let settings = await withCheckedContinuation { (continuation: CheckedContinuation<UNNotificationSettings, Never>) in
+            UNUserNotificationCenter.current().getNotificationSettings { continuation.resume(returning: $0) }
+        }
+        switch settings.authorizationStatus {
+        case .authorized, .provisional, .ephemeral:
+            return true
+        case .denied:
+            return false
+        case .notDetermined:
+            guard !askedForAlerts else { return false }
+            askedForAlerts = true
+            return await requestNotificationPermission()
+        @unknown default:
+            return false
+        }
+    }
+
+    /// An accessory app does not get the permission dialog unless it is briefly a normal app.
+    private func requestNotificationPermission() async -> Bool {
+        NSApp.setActivationPolicy(.regular)
+        NSApp.activate()
+        let granted: Bool
+        do {
+            granted = try await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound])
+        } catch {
+            granted = false
+        }
+        NSApp.setActivationPolicy(.accessory)
+        return granted
+    }
+
+    private func deliver(_ request: UNNotificationRequest) async -> Bool {
+        await withCheckedContinuation { continuation in
+            UNUserNotificationCenter.current().add(request) { error in
+                continuation.resume(returning: error == nil)
+            }
         }
     }
 
@@ -470,7 +535,7 @@ final class UsageMonitor: ObservableObject {
         static let batteryMinutes = "batteryMinutes"
         static let alertsEnabled = "alertsEnabled"
         static let alertThreshold = "alertThreshold"
-        static let alertedReset = "alertedReset"
+        static let alertedCycle = "alertedCycle"
         static let showBattery = "showBattery"
         static let menuBarStyle = "menuBarStyle"
         static let barSlots = "barSlots"
@@ -478,6 +543,16 @@ final class UsageMonitor: ObservableObject {
         static let menuBarOffset = "menuBarOffset"
         static let menuTextTemplate = "menuTextTemplate"
         static let batteryMark = "batteryMark"
+    }
+}
+
+private final class UsageNotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification,
+        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+    ) {
+        completionHandler([.banner, .list, .sound])
     }
 }
 
