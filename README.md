@@ -26,7 +26,7 @@ The downloadable disk image is on the [Releases](https://github.com/chen-bliss/M
 
 ### Install
 
-1. Download `MacTokenGauge-1.3.0.dmg` from Releases.
+1. Download `MacTokenGauge-1.3.1.dmg` from Releases.
 2. Open the disk image.
 3. Drag **MacTokenGauge** into the Applications folder.
 4. Eject the disk image.
@@ -69,7 +69,7 @@ Then open MacTokenGauge as usual.
 If the disk image itself will not open, clear its marker and open it again:
 
 ```bash
-xattr -dr com.apple.quarantine ~/Downloads/MacTokenGauge-1.3.0.dmg
+xattr -dr com.apple.quarantine ~/Downloads/MacTokenGauge-1.3.1.dmg
 ```
 
 ### Privacy
@@ -98,7 +98,7 @@ Open `ChatGPTGauge.xcodeproj` in Xcode, choose My Mac, and run. The product name
 
 ### 安装
 
-1. 在 Releases 页面下载 `MacTokenGauge-1.3.0.dmg`。
+1. 在 Releases 页面下载 `MacTokenGauge-1.3.1.dmg`。
 2. 打开这个磁盘映像。
 3. 把 **MacTokenGauge** 拖进“应用程序”文件夹。
 4. 推出磁盘映像。
@@ -141,7 +141,7 @@ xattr -dr com.apple.quarantine /Applications/MacTokenGauge.app
 如果磁盘映像本身打不开，先清掉它的隔离标记，再打开：
 
 ```bash
-xattr -dr com.apple.quarantine ~/Downloads/MacTokenGauge-1.3.0.dmg
+xattr -dr com.apple.quarantine ~/Downloads/MacTokenGauge-1.3.1.dmg
 ```
 
 ### 隐私

@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import IOKit.pwr_mgt
 import SwiftUI
 import UserNotifications
 
@@ -70,7 +71,7 @@ final class UsageMonitor: ObservableObject {
     private var popoverVisible = false
     private var askedForAlerts = false
     private var powerObserver: NSObjectProtocol?
-    private var wakeObservers: [NSObjectProtocol] = []
+    private var screenWake: ScreenWakeHub?
     private var lastWakeRefresh = Date.distantPast
 
     init() {
@@ -124,18 +125,14 @@ final class UsageMonitor: ObservableObject {
             }
         }
         observeScreenWake()
-        lastWakeRefresh = Date()
     }
 
     /// Launch always loads usage once. This switch only adds a refresh when the screen turns on later.
     private func observeScreenWake() {
-        let center = NSWorkspace.shared.notificationCenter
-        let names = [NSWorkspace.didWakeNotification, NSWorkspace.screensDidWakeNotification]
-        wakeObservers = names.map { name in
-            center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated {
-                    self?.refreshAfterScreenWake()
-                }
+        lastWakeRefresh = Date()
+        screenWake = ScreenWakeHub { [weak self] in
+            Task { @MainActor in
+                self?.refreshAfterScreenWake()
             }
         }
     }
@@ -481,5 +478,98 @@ final class UsageMonitor: ObservableObject {
         static let menuBarOffset = "menuBarOffset"
         static let menuTextTemplate = "menuTextTemplate"
         static let batteryMark = "batteryMark"
+    }
+}
+
+private typealias NotifyHandler = @convention(block) (Int32) -> Void
+
+@_silgen_name("notify_register_dispatch")
+private func notify_register_dispatch(
+    _ name: UnsafePointer<CChar>,
+    _ token: UnsafeMutablePointer<Int32>,
+    _ queue: DispatchQueue,
+    _ handler: @escaping NotifyHandler
+) -> UInt32
+
+@_silgen_name("notify_get_state")
+private func notify_get_state(_ token: Int32, _ state: UnsafeMutablePointer<UInt64>) -> UInt32
+
+// IOMessage.h macros are not visible to Swift. These match iokit_common_msg values.
+private let ioMessageCanSystemSleep: UInt32 = 0xE000_0270
+private let ioMessageSystemWillSleep: UInt32 = 0xE000_0280
+private let ioMessageSystemHasPoweredOn: UInt32 = 0xE000_0300
+
+/// Menu bar apps often miss block-based NSWorkspace wake notifications after sleep.
+/// This listens on the main thread, and also watches display power and system wake.
+private final class ScreenWakeHub: NSObject {
+    private let onWake: () -> Void
+    private var powerPort: io_connect_t = 0
+    private var notifyPort: IONotificationPortRef?
+    private var powerNotifier: io_object_t = 0
+    private var displayNotifyToken: Int32 = 0
+    private var primedDisplayStatus = false
+
+    init(onWake: @escaping () -> Void) {
+        self.onWake = onWake
+        super.init()
+        let workspace = NSWorkspace.shared.notificationCenter
+        workspace.addObserver(self, selector: #selector(handleWake(_:)), name: NSWorkspace.didWakeNotification, object: nil)
+        workspace.addObserver(self, selector: #selector(handleWake(_:)), name: NSWorkspace.screensDidWakeNotification, object: nil)
+        DistributedNotificationCenter.default().addObserver(
+            self,
+            selector: #selector(handleWake(_:)),
+            name: Notification.Name("com.apple.screenIsUnlocked"),
+            object: nil,
+            suspensionBehavior: .deliverImmediately
+        )
+        registerDisplayStatus()
+        registerSystemPower()
+    }
+
+    @objc private func handleWake(_ notification: Notification) {
+        onWake()
+    }
+
+    private func registerDisplayStatus() {
+        notify_register_dispatch("com.apple.iokit.hid.displayStatus", &displayNotifyToken, .main) { [weak self] token in
+            guard let self else { return }
+            var state: UInt64 = 0
+            notify_get_state(token, &state)
+            if !self.primedDisplayStatus {
+                self.primedDisplayStatus = true
+                return
+            }
+            guard state != 0 else { return }
+            self.onWake()
+        }
+    }
+
+    private func registerSystemPower() {
+        var port: IONotificationPortRef?
+        powerPort = IORegisterForSystemPower(
+            Unmanaged.passUnretained(self).toOpaque(),
+            &port,
+            { context, _, messageType, messageArgument in
+                guard let context else { return }
+                let hub = Unmanaged<ScreenWakeHub>.fromOpaque(context).takeUnretainedValue()
+                hub.handlePower(messageType, messageArgument)
+            },
+            &powerNotifier
+        )
+        notifyPort = port
+        guard powerPort != 0, let port else { return }
+        CFRunLoopAddSource(CFRunLoopGetMain(), IONotificationPortGetRunLoopSource(port).takeUnretainedValue(), .commonModes)
+    }
+
+    private func handlePower(_ messageType: UInt32, _ messageArgument: UnsafeMutableRawPointer?) {
+        switch messageType {
+        case ioMessageCanSystemSleep, ioMessageSystemWillSleep:
+            guard let messageArgument else { return }
+            IOAllowPowerChange(powerPort, Int(bitPattern: messageArgument))
+        case ioMessageSystemHasPoweredOn:
+            onWake()
+        default:
+            break
+        }
     }
 }
