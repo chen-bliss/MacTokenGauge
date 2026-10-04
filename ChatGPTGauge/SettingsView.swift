@@ -17,6 +17,12 @@ struct SettingsView: View {
 
     private var form: some View {
         Form {
+            if !monitor.onboardingComplete {
+                Section(L10n.s(.welcomeTitle)) {
+                    Text(L10n.s(.welcomeHelp)).font(.callout)
+                    Button(L10n.s(.getStarted)) { monitor.completeOnboarding() }
+                }
+            }
             Section(L10n.s(.sectionLanguage)) {
                 Picker(L10n.s(.languageLabel), selection: $monitor.appLanguage) {
                     ForEach(AppLanguage.allCases) { language in
@@ -29,8 +35,10 @@ struct SettingsView: View {
             }
 
             Section(L10n.s(.sectionData)) {
-                Toggle(L10n.s(.liveToggle), isOn: $monitor.liveEnabled)
-                Text(L10n.s(.liveHelp))
+                Toggle("ChatGPT", isOn: $monitor.chatgptEnabled)
+                Toggle("Cursor", isOn: $monitor.cursorEnabled)
+                Toggle("Claude", isOn: $monitor.claudeEnabled)
+                Text(L10n.s(.providerHelp))
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 LabeledContent(L10n.s(.refreshInterval)) {
@@ -72,7 +80,7 @@ struct SettingsView: View {
                     barEditor
                 }
                 Toggle(L10n.s(.showBattery), isOn: $monitor.showBattery)
-                if monitor.showBattery || monitor.menuBarStyle == .battery {
+                if monitor.batteryNeeded {
                     Picker(L10n.s(.batteryChoice), selection: $monitor.batteryMark) {
                         ForEach(BatteryMark.allCases) { mark in
                             Text(mark.title).tag(mark)
@@ -135,6 +143,26 @@ struct SettingsView: View {
                 Text(L10n.s(.noteStyles))
                 Text(L10n.s(.notePrivacy))
                 Text(L10n.s(.noteAccounts))
+                Button(L10n.s(.loginHelp)) {
+                    NSWorkspace.shared.open(URL(string: "https://github.com/chen-bliss/MacTokenGauge#service-setup")!)
+                }
+                Button(L10n.s(monitor.checkingUpdates ? .checkingUpdates : .releases)) { monitor.checkForUpdates() }
+                    .disabled(monitor.checkingUpdates)
+                if let result = monitor.updateResult {
+                    switch result {
+                    case .available(let version, let url):
+                        Text(L10n.f(.updateAvailable, version))
+                        Button(L10n.s(.openRelease)) { NSWorkspace.shared.open(url) }
+                    case .upToDate: Text(L10n.s(.upToDate))
+                    case .failed:
+                        Text(L10n.s(.updateCheckFailed))
+                        Button(L10n.s(.openRelease)) {
+                            NSWorkspace.shared.open(URL(string: "https://github.com/chen-bliss/MacTokenGauge/releases")!)
+                        }
+                    }
+                }
+                Button(L10n.s(.diagnostics)) { monitor.exportDiagnostics() }
+                Text(L10n.s(.diagnosticsHelp))
             }
             .font(.caption)
             .foregroundStyle(.secondary)
@@ -142,17 +170,18 @@ struct SettingsView: View {
         .formStyle(.grouped)
         .frame(width: 480)
         .padding(.top, 8)
-        .onChange(of: monitor.liveEnabled) { _, _ in monitor.savePreferences() }
-        .onChange(of: monitor.refreshMinutes) { _, _ in monitor.savePreferences() }
+        .onChange(of: monitor.chatgptEnabled) { _, _ in monitor.providersChanged() }
+        .onChange(of: monitor.cursorEnabled) { _, _ in monitor.providersChanged() }
+        .onChange(of: monitor.claudeEnabled) { _, _ in monitor.providersChanged() }
+        .onChange(of: monitor.refreshMinutes) { _, _ in monitor.refreshIntervalChanged() }
         .onChange(of: monitor.refreshOnWake) { _, _ in monitor.savePreferences(scheduleRefresh: false) }
-        .onChange(of: monitor.batteryMinutes) { _, _ in monitor.savePreferences(scheduleRefresh: false) }
-        .onChange(of: monitor.alertsEnabled) { _, _ in monitor.savePreferences() }
-        .onChange(of: monitor.alertThreshold) { _, _ in monitor.savePreferences() }
+        .onChange(of: monitor.batteryMinutes) { _, _ in monitor.appearanceChanged() }
+        .onChange(of: monitor.alertsEnabled) { _, _ in monitor.alertPreferencesChanged() }
+        .onChange(of: monitor.alertThreshold) { _, _ in monitor.alertPreferencesChanged() }
         .onChange(of: monitor.showBattery) { _, _ in
-            monitor.battery = BatteryReader.current()
-            monitor.savePreferences()
+            monitor.appearanceChanged()
         }
-        .onChange(of: monitor.menuBarStyle) { _, _ in monitor.savePreferences() }
+        .onChange(of: monitor.menuBarStyle) { _, _ in monitor.appearanceChanged() }
         .onChange(of: launchAtLogin) { _, enabled in
             guard enabled != (SMAppService.mainApp.status == .enabled) else { return }
             updateLaunchAtLogin(enabled)

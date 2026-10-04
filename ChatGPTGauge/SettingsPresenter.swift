@@ -2,6 +2,11 @@ import AppKit
 import SwiftUI
 
 @MainActor
+protocol ApplicationMenuRetitling: NSApplicationDelegate {
+    func retitleMenu()
+}
+
+@MainActor
 final class SettingsPresenter: NSObject, NSWindowDelegate {
     static let shared = SettingsPresenter()
 
@@ -19,9 +24,7 @@ final class SettingsPresenter: NSObject, NSWindowDelegate {
 
     static func retitle() {
         shared.window?.title = L10n.s(.settingsWindow)
-        if let delegate = NSApp.delegate as? AppDelegate {
-            AppMenu.install(target: delegate)
-        }
+        (NSApp?.delegate as? ApplicationMenuRetitling)?.retitleMenu()
     }
 
     private func present(_ monitor: UsageMonitor) {

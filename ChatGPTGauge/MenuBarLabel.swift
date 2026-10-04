@@ -43,7 +43,7 @@ struct MenuBarLabel: View {
 
     @ViewBuilder
     private var textLabel: some View {
-        let visible = accounts.filter { UsageFormatting.headline($0.windows) != nil }
+        let visible = accounts.filter { $0.state != .paused }
         if visible.isEmpty {
             Image(systemName: "gauge.with.dots.needle.33percent")
             Text(L10n.s(.usage))
@@ -77,7 +77,7 @@ struct MenuBarLabel: View {
     }
 
     private var tightestWindow: UsageWindow? {
-        let windows = accounts.flatMap(\.windows)
+        let windows = accounts.filter(\.showsLiveQuota).flatMap(\.headlineWindows)
         return UsageFormatting.headline(windows)
     }
 
@@ -121,12 +121,14 @@ struct MenuBarLabel: View {
             guard !account.windows.isEmpty else { return nil }
             let body = account.windows.map { window -> String in
                 let name = L10n.windowTitle(window)
+                if let detail = window.detail { return "\(name): \(detail)" }
                 guard let resetAt = window.resetAt else {
                     return L10n.f(.helpLeft, name, Int(window.remainingPercent.rounded()))
                 }
                 return L10n.f(.helpLeftReset, name, Int(window.remainingPercent.rounded()), UsageFormatting.clock(resetAt, now: now))
             }.joined(separator: L10n.period)
-            return L10n.f(.accountLine, account.name, body)
+            let time = account.capturedAt.map { UsageFormatting.updatedAgo($0, now: now) } ?? ""
+            return L10n.f(.accountLine, account.name, [account.stateLabel, time, body, account.state == .current ? "" : account.status].filter { !$0.isEmpty }.joined(separator: L10n.period))
         }
         if showBattery || style == .battery, let battery {
             lines.append(battery.charging ? L10n.f(.batteryChargingHelp, battery.percent) : L10n.f(.batteryIdleHelp, battery.percent))
@@ -146,12 +148,16 @@ enum MenuText {
         let pattern = template.trimmingCharacters(in: .whitespacesAndNewlines)
         let source = pattern.isEmpty ? fallback : pattern
         let parts = accounts.compactMap { account -> String? in
-            guard let window = UsageFormatting.headline(account.windows) else { return nil }
+            guard account.state != .paused else { return nil }
+            guard let window = UsageFormatting.headline(account.headlineWindows) ?? account.windows.first(where: { !$0.isQuota }) else {
+                return "\(account.menuTitle) ?"
+            }
             let countdown = window.resetAt.map { UsageFormatting.shortCountdown(until: $0, now: now) } ?? ""
             let reset = window.resetAt.map { UsageFormatting.clock($0, now: now) } ?? ""
-            return source
+            let marker = account.state == .current ? "" : "~"
+            return marker + source
                 .replacingOccurrences(of: "{name}", with: account.menuTitle)
-                .replacingOccurrences(of: "{percent}", with: "\(Int(window.remainingPercent.rounded()))%")
+                .replacingOccurrences(of: "{percent}", with: window.displayValue)
                 .replacingOccurrences(of: "{countdown}", with: countdown)
                 .replacingOccurrences(of: "{window}", with: L10n.windowTitle(window))
                 .replacingOccurrences(of: "{reset}", with: reset)

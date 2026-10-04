@@ -6,11 +6,16 @@ import UserNotifications
 
 @MainActor
 final class UsageMonitor: ObservableObject {
+    @Published var checkingUpdates = false
+    @Published var updateResult: UpdateResult?
     @Published var accounts: [ProviderAccount] = ProviderAccount.placeholders
     @Published var battery: BatteryReading?
     @Published var now = Date()
     @Published var isRefreshing = false
-    @Published var liveEnabled: Bool
+    @Published var onboardingComplete: Bool
+    @Published var chatgptEnabled: Bool
+    @Published var cursorEnabled: Bool
+    @Published var claudeEnabled: Bool
     @Published var refreshMinutes: Double
     @Published var refreshOnWake: Bool
     @Published var batteryMinutes: Double
@@ -26,7 +31,6 @@ final class UsageMonitor: ObservableObject {
             L10n.language = appLanguage
             savePreferences(scheduleRefresh: false)
             SettingsPresenter.retitle()
-            reload(userInitiated: false)
         }
     }
     @Published var menuTextTemplate: String {
@@ -63,6 +67,9 @@ final class UsageMonitor: ObservableObject {
         return max(280, width - 360)
     }
 
+    private let defaults: UserDefaults
+    private let providerLoader: @Sendable (String) async -> ProviderAccount
+    private var reloadGeneration = 0
     private var started = false
     private var clockTimer: Timer?
     private var batteryTimer: Timer?
@@ -70,14 +77,21 @@ final class UsageMonitor: ObservableObject {
     private var reloadTask: Task<Void, Never>?
     private var popoverVisible = false
     private var askedForAlerts = false
+    private var evaluatingAlerts: Set<String> = []
+    private var pendingAlerts: Set<String> = []
     private let notificationPoster = UsageNotificationDelegate()
     private var powerObserver: NSObjectProtocol?
     private var screenWake: ScreenWakeHub?
     private var lastWakeRefresh = Date.distantPast
 
-    init() {
-        let defaults = UserDefaults.standard
-        liveEnabled = defaults.object(forKey: Keys.liveEnabled) as? Bool ?? true
+    init(defaults: UserDefaults = .standard,
+         providerLoader: @escaping @Sendable (String) async -> ProviderAccount = { await UsageMonitor.loadProvider($0) }) {
+        self.defaults = defaults
+        self.providerLoader = providerLoader
+        onboardingComplete = defaults.object(forKey: "onboardingComplete") as? Bool ?? (defaults.object(forKey: Keys.refreshMinutes) != nil)
+        chatgptEnabled = defaults.object(forKey: Keys.chatgptEnabled) as? Bool ?? true
+        cursorEnabled = defaults.object(forKey: Keys.cursorEnabled) as? Bool ?? defaults.object(forKey: "liveEnabled") as? Bool ?? true
+        claudeEnabled = defaults.object(forKey: Keys.claudeEnabled) as? Bool ?? defaults.object(forKey: "liveEnabled") as? Bool ?? true
         refreshMinutes = defaults.object(forKey: Keys.refreshMinutes) as? Double ?? 5
         refreshOnWake = defaults.object(forKey: Keys.refreshOnWake) as? Bool ?? true
         batteryMinutes = defaults.object(forKey: Keys.batteryMinutes) as? Double ?? 2
@@ -99,23 +113,33 @@ final class UsageMonitor: ObservableObject {
             barSlots = BarSlot.defaults
         }
         L10n.language = language
-        Task { @MainActor in
-            self.start()
-        }
+    }
+
+    func stop() {
+        reloadGeneration += 1
+        reloadTask?.cancel()
+        reloadTask = nil
+        clockTimer?.invalidate()
+        batteryTimer?.invalidate()
+        refreshTimer?.invalidate()
+        clockTimer = nil
+        batteryTimer = nil
+        refreshTimer = nil
+        if let powerObserver { NotificationCenter.default.removeObserver(powerObserver) }
+        powerObserver = nil
+        screenWake = nil
+        started = false
     }
 
     func start() {
         guard !started else { return }
         started = true
-        #if DEBUG
-        UsageParser.selfCheck()
-        CursorUsageClient.selfCheck()
-        Self.selfCheckAlerts()
-        #endif
         UNUserNotificationCenter.current().delegate = notificationPoster
         battery = BatteryReader.current()
         refreshPowerSaver(reschedule: false)
-        reload(userInitiated: false)
+        markPausedProviders()
+        if onboardingComplete { reload(userInitiated: false) }
+        else { SettingsPresenter.show(monitor: self) }
         scheduleClock()
         scheduleBattery()
         powerObserver = NotificationCenter.default.addObserver(
@@ -156,13 +180,18 @@ final class UsageMonitor: ObservableObject {
     }
 
     func reload(userInitiated: Bool, ignorePause: Bool = false) {
+        guard onboardingComplete else { return }
         reloadTask?.cancel()
-        reloadTask = Task { await performReload(includeLive: liveEnabled, userInitiated: userInitiated, ignorePause: ignorePause) }
+        reloadGeneration += 1
+        let generation = reloadGeneration
+        reloadTask = Task { await performReload(userInitiated: userInitiated, ignorePause: ignorePause, generation: generation) }
     }
 
-    func savePreferences(scheduleRefresh: Bool = true) {
-        let defaults = UserDefaults.standard
-        defaults.set(liveEnabled, forKey: Keys.liveEnabled)
+    func savePreferences(scheduleRefresh: Bool = false) {
+        defaults.set(onboardingComplete, forKey: "onboardingComplete")
+        defaults.set(chatgptEnabled, forKey: Keys.chatgptEnabled)
+        defaults.set(cursorEnabled, forKey: Keys.cursorEnabled)
+        defaults.set(claudeEnabled, forKey: Keys.claudeEnabled)
         defaults.set(refreshMinutes, forKey: Keys.refreshMinutes)
         defaults.set(refreshOnWake, forKey: Keys.refreshOnWake)
         defaults.set(batteryMinutes, forKey: Keys.batteryMinutes)
@@ -177,15 +206,70 @@ final class UsageMonitor: ObservableObject {
         if let data = try? JSONEncoder().encode(barSlots) {
             defaults.set(data, forKey: Keys.barSlots)
         }
+        if scheduleRefresh { self.scheduleRefresh() }
+    }
+
+    func appearanceChanged() {
+        savePreferences()
         scheduleClock()
+        tickBattery()
         scheduleBattery()
-        if scheduleRefresh { reload(userInitiated: false) }
+    }
+
+    func refreshIntervalChanged() {
+        savePreferences()
+        if started { scheduleRefresh() }
+    }
+
+    func alertPreferencesChanged() {
+        savePreferences()
+        Task { for account in accounts where account.canAlert { await considerAlerts(for: account) } }
+    }
+
+    func isEnabled(_ id: String) -> Bool {
+        switch id {
+        case "chatgpt": return chatgptEnabled
+        case "cursor": return cursorEnabled
+        case "claude": return claudeEnabled
+        default: return false
+        }
+    }
+
+    func completeOnboarding() {
+        onboardingComplete = true
+        savePreferences()
+        markPausedProviders()
+        reload(userInitiated: false)
+    }
+
+    func providersChanged() {
+        savePreferences()
+        markPausedProviders()
+        if started { reload(userInitiated: false, ignorePause: true) }
+    }
+
+    private func markPausedProviders() {
+        for index in accounts.indices {
+            if !isEnabled(accounts[index].id) {
+                accounts[index].state = .paused
+            } else if accounts[index].state == .paused {
+                accounts[index].state = accounts[index].windows.isEmpty ? .loading : .stale
+            }
+        }
+    }
+
+    nonisolated private static func loadProvider(_ id: String) async -> ProviderAccount {
+        switch id {
+        case "chatgpt": return await ChatGPTAccountLoader.load(includeLive: true)
+        case "cursor": return await CursorAccountLoader.load()
+        default: return await ClaudeAccountLoader.load()
+        }
     }
 
     func updateSlotTarget(_ id: UUID, target: String) {
         guard let index = barSlots.firstIndex(where: { $0.id == id }) else { return }
         barSlots[index].target = target
-        savePreferences()
+        appearanceChanged()
     }
 
     func updateSlotColor(_ id: UUID, color: Color) {
@@ -205,7 +289,7 @@ final class UsageMonitor: ObservableObject {
     func removeSlot(_ id: UUID) {
         guard barSlots.count > 1 else { return }
         barSlots.removeAll { $0.id == id }
-        savePreferences()
+        appearanceChanged()
     }
 
     func addSlot() {
@@ -213,17 +297,25 @@ final class UsageMonitor: ObservableObject {
         let used = Set(barSlots.map(\.target))
         let target = BarTarget.catalog.first { !used.contains($0.id) }?.id ?? "battery"
         barSlots.append(BarSlot(id: UUID(), target: target, colorHex: "5B8DEF"))
-        savePreferences()
+        appearanceChanged()
     }
 
     private var clockNeeded: Bool {
         popoverVisible || menuBarStyle == .text
     }
 
+    var batteryNeeded: Bool {
+        Self.batteryNeeded(showBattery: showBattery, style: menuBarStyle, slots: barSlots)
+    }
+
+    static func batteryNeeded(showBattery: Bool, style: MenuBarStyle, slots: [BarSlot]) -> Bool {
+        showBattery || style == .battery || ([.bars, .rings, .combined].contains(style) && slots.contains { $0.target == "battery" })
+    }
+
     private func scheduleBattery() {
         batteryTimer?.invalidate()
         batteryTimer = nil
-        guard showBattery || menuBarStyle == .battery else { return }
+        guard batteryNeeded else { return }
         let interval = batteryCheckInterval
         let timer = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.tickBattery() }
@@ -235,7 +327,7 @@ final class UsageMonitor: ObservableObject {
 
     private func tickBattery() {
         refreshPowerSaver()
-        guard showBattery || menuBarStyle == .battery else { return }
+        guard batteryNeeded else { return }
         let reading = BatteryReader.current()
         guard reading != battery else { return }
         battery = reading
@@ -295,6 +387,8 @@ final class UsageMonitor: ObservableObject {
 
     private func scheduleRefresh() {
         refreshTimer?.invalidate()
+        refreshTimer = nil
+        guard onboardingComplete, ["chatgpt", "cursor", "claude"].contains(where: isEnabled) else { return }
         let delay = nextRefreshDelay()
         let timer = Timer(fire: Date().addingTimeInterval(delay), interval: 0, repeats: false) { [weak self] _ in
             MainActor.assumeIsolated {
@@ -307,117 +401,53 @@ final class UsageMonitor: ObservableObject {
     }
 
     private func nextRefreshDelay(now: Date = Date()) -> TimeInterval {
-        let interval = TimeInterval(liveInterval)
-        var delays: [TimeInterval] = []
-        for id in ["chatgpt", "cursor", "claude"] {
-            if id != "chatgpt", !liveEnabled { continue }
-            guard let account = accounts.first(where: { $0.id == id }) else {
-                delays.append(interval)
-                continue
-            }
-            if let resume = Self.resumeAt(account, now: now), resume > now {
-                delays.append(resume.timeIntervalSince(now))
-            } else {
-                delays.append(interval)
-            }
-        }
-        return min(max(delays.min() ?? interval, 30), 24 * 60 * 60)
-    }
-
-    /// When the window that actually blocks more use is empty, wait until it resets
-    /// instead of polling the network on the normal interval.
-    private static func resumeAt(_ account: ProviderAccount, now: Date) -> Date? {
-        let gates = gatingWindows(account)
-        guard !gates.isEmpty, gates.allSatisfy({ $0.remainingPercent <= 0.5 }) else { return nil }
-        guard gates.allSatisfy({ $0.resetAt != nil }) else { return nil }
-        let future = gates.compactMap(\.resetAt).filter { $0 > now }
-        guard let earliest = future.min() else { return nil }
-        return earliest.addingTimeInterval(20)
-    }
-
-    private static func gatingWindows(_ account: ProviderAccount) -> [UsageWindow] {
-        switch account.id {
-        case "chatgpt":
-            return account.windows.filter { $0.id == "primary" }
-        case "claude":
-            return account.windows.filter { $0.id == "five_hour" }
-        case "cursor":
-            if let extra = account.windows.first(where: { $0.id == "cursor-ondemand" }),
-               extra.detail != nil || extra.remainingPercent > 0.5 {
-                return []
-            }
-            return account.windows.filter { ["cursor-total", "cursor-auto", "cursor-api"].contains($0.id) }
-        default:
-            return []
-        }
-    }
-
-    private static func loadIfNeeded(_ needed: Bool, _ load: () async -> ProviderAccount) async -> ProviderAccount? {
-        guard needed else { return nil }
-        return await load()
+        let enabled = Set(["chatgpt", "cursor", "claude"].filter(isEnabled))
+        return RefreshPolicy.nextDelay(accounts: accounts, enabled: enabled,
+            interval: RefreshPolicy.interval(minutes: refreshMinutes, powerSaver: powerSaver), now: now)
     }
 
     private func shouldFetch(_ id: String, userInitiated: Bool, ignorePause: Bool, now: Date) -> Bool {
-        if userInitiated || ignorePause { return true }
-        if id != "chatgpt", !liveEnabled { return false }
-        guard let account = accounts.first(where: { $0.id == id }), !account.windows.isEmpty else { return true }
-        if let resume = Self.resumeAt(account, now: now) {
-            return resume <= now
-        }
-        return true
+        RefreshPolicy.shouldFetch(account: accounts.first { $0.id == id }, enabled: isEnabled(id),
+                                  force: userInitiated || ignorePause, now: now)
     }
 
-    private var liveInterval: Int {
-        let chosen = max(60, Int(refreshMinutes * 60))
-        guard powerSaver else { return chosen }
-        return max(chosen * 3, 15 * 60)
-    }
-
-    private func performReload(includeLive: Bool, userInitiated: Bool, ignorePause: Bool) async {
+    private func performReload(userInitiated: Bool, ignorePause: Bool, generation: Int) async {
         refreshPowerSaver()
         if userInitiated { isRefreshing = true }
-        defer { if userInitiated { isRefreshing = false } }
-
+        defer {
+            if generation == reloadGeneration {
+                isRefreshing = false
+                scheduleRefresh()
+            }
+        }
         let moment = Date()
-        let fetchChat = shouldFetch("chatgpt", userInitiated: userInitiated, ignorePause: ignorePause, now: moment)
-        let fetchCursor = includeLive && shouldFetch("cursor", userInitiated: userInitiated, ignorePause: ignorePause, now: moment)
-        let fetchClaude = includeLive && shouldFetch("claude", userInitiated: userInitiated, ignorePause: ignorePause, now: moment)
-
-        async let chatTask = Self.loadIfNeeded(fetchChat) { await ChatGPTAccountLoader.load(includeLive: true) }
-        async let cursorTask = Self.loadIfNeeded(fetchCursor) { await CursorAccountLoader.load() }
-        async let claudeTask = Self.loadIfNeeded(fetchClaude) { await ClaudeAccountLoader.load() }
-        let chat = await chatTask
-        let cursor = await cursorTask
-        let claude = await claudeTask
-        if Task.isCancelled { return }
-
-        var next = accounts
-        if let chat { merge(chat, into: &next) }
-        if let cursor { merge(cursor, into: &next) }
-        if let claude { merge(claude, into: &next) }
-        accounts = next
-        if let chat, !chat.windows.isEmpty { await considerAlerts(for: chat) }
-        if let cursor, !cursor.windows.isEmpty { await considerAlerts(for: cursor) }
-        if let claude, !claude.windows.isEmpty { await considerAlerts(for: claude) }
-        scheduleRefresh()
+        let ids = ["chatgpt", "cursor", "claude"].filter {
+            shouldFetch($0, userInitiated: userInitiated, ignorePause: ignorePause, now: moment)
+        }
+        let loader = providerLoader
+        await withTaskGroup(of: ProviderAccount.self) { group in
+            for id in ids { group.addTask { await loader(id) } }
+            for await fresh in group {
+                guard !Task.isCancelled, generation == reloadGeneration, isEnabled(fresh.id) else { continue }
+                let previous = accounts.first { $0.id == fresh.id }
+                if previous?.accountIdentity != fresh.accountIdentity {
+                    clearAlertCycles(for: fresh.id)
+                }
+                let merged = ProviderAccount.merging(fresh, previous: previous)
+                if let index = accounts.firstIndex(where: { $0.id == fresh.id }) { accounts[index] = merged }
+                else { accounts.append(merged) }
+                // Publish each service as soon as it arrives. Notifications cannot delay publication.
+                Task { await considerAlerts(for: merged) }
+            }
+        }
     }
 
-    private func merge(_ fresh: ProviderAccount, into list: inout [ProviderAccount]) {
-        guard let index = list.firstIndex(where: { $0.id == fresh.id }) else {
-            list.append(fresh)
-            return
-        }
-        if fresh.origin == .localLog, list[index].origin == .live, !list[index].windows.isEmpty {
-            return
-        }
-        if fresh.windows.isEmpty, !list[index].windows.isEmpty {
-            var kept = list[index]
-            kept.status = fresh.status
-            list[index] = kept
-            return
-        }
-        list[index] = fresh
+    private func clearAlertCycles(for id: String) {
+        let cycles = defaults.dictionary(forKey: Keys.alertedCycle) ?? [:]
+        defaults.set(cycles.filter { !$0.key.hasPrefix(id + ".") }, forKey: Keys.alertedCycle)
     }
+
+    func waitForRefresh() async { await reloadTask?.value }
 
     /// Alert only while some quota is still left. A window that is already used up
     /// does not need a reminder, and an uncapped spend row is not a percent.
@@ -427,23 +457,18 @@ final class UsageMonitor: ObservableObject {
         return remaining <= threshold
     }
 
-    private static func selfCheckAlerts() {
-        precondition(wantsUsageAlert(remaining: 15, threshold: 20, hasAmountDetail: false, alreadyAlerted: false))
-        precondition(!wantsUsageAlert(remaining: 0, threshold: 20, hasAmountDetail: false, alreadyAlerted: false))
-        precondition(!wantsUsageAlert(remaining: 0.4, threshold: 20, hasAmountDetail: false, alreadyAlerted: false))
-        precondition(!wantsUsageAlert(remaining: 40, threshold: 20, hasAmountDetail: false, alreadyAlerted: false))
-        precondition(!wantsUsageAlert(remaining: 15, threshold: 20, hasAmountDetail: false, alreadyAlerted: true))
-        precondition(!wantsUsageAlert(remaining: 8, threshold: 20, hasAmountDetail: true, alreadyAlerted: false))
-        precondition(wantsUsageAlert(remaining: 5, threshold: 5, hasAmountDetail: false, alreadyAlerted: false))
-        precondition(!wantsUsageAlert(remaining: 21, threshold: 20, hasAmountDetail: false, alreadyAlerted: false))
-    }
-
     private func considerAlerts(for account: ProviderAccount) async {
-        guard alertsEnabled else { return }
+        guard !evaluatingAlerts.contains(account.id) else { return }
+        evaluatingAlerts.insert(account.id)
+        defer { evaluatingAlerts.remove(account.id) }
+        guard alertsEnabled, account.canAlert, isEnabled(account.id),
+              let captured = account.capturedAt,
+              Date().timeIntervalSince(captured) < max(600, refreshMinutes * 120) else { return }
         guard await notificationsAllowed() else { return }
+        guard accounts.first(where: { $0.id == account.id }) == account else { return }
 
         var stored: [String: Double] = [:]
-        if let raw = UserDefaults.standard.dictionary(forKey: Keys.alertedCycle) {
+        if let raw = defaults.dictionary(forKey: Keys.alertedCycle) {
             for (key, value) in raw {
                 if let number = value as? NSNumber {
                     stored[key] = number.doubleValue
@@ -451,7 +476,7 @@ final class UsageMonitor: ObservableObject {
             }
         }
         var changed = false
-        for window in account.windows {
+        for window in account.windows where window.isQuota {
             let key = "\(account.id).\(window.id)"
             let resetKey = window.resetAt?.timeIntervalSince1970 ?? -1
             if window.remainingPercent > alertThreshold + 2 {
@@ -479,12 +504,21 @@ final class UsageMonitor: ObservableObject {
                 content: content,
                 trigger: nil
             )
-            guard await deliver(request) else { continue }
+            let pendingKey = "\(key).\(resetKey)"
+            guard !pendingAlerts.contains(pendingKey) else { continue }
+            pendingAlerts.insert(pendingKey)
+            let delivered = await deliver(request)
+            pendingAlerts.remove(pendingKey)
+            guard delivered, accounts.first(where: { $0.id == account.id })?.accountIdentity == account.accountIdentity,
+                  isEnabled(account.id) else { continue }
             stored[key] = resetKey
             changed = true
         }
         if changed {
-            UserDefaults.standard.set(stored, forKey: Keys.alertedCycle)
+            var latest = defaults.dictionary(forKey: Keys.alertedCycle) ?? [:]
+            for key in latest.keys where key.hasPrefix(account.id + ".") { latest.removeValue(forKey: key) }
+            for (key, value) in stored where key.hasPrefix(account.id + ".") { latest[key] = value }
+            defaults.set(latest, forKey: Keys.alertedCycle)
         }
     }
 
@@ -529,7 +563,9 @@ final class UsageMonitor: ObservableObject {
     }
 
     private enum Keys {
-        static let liveEnabled = "liveEnabled"
+        static let chatgptEnabled = "chatgptEnabled"
+        static let cursorEnabled = "cursorEnabled"
+        static let claudeEnabled = "claudeEnabled"
         static let refreshMinutes = "refreshMinutes"
         static let refreshOnWake = "refreshOnWake"
         static let batteryMinutes = "batteryMinutes"
@@ -569,6 +605,9 @@ private func notify_register_dispatch(
 @_silgen_name("notify_get_state")
 private func notify_get_state(_ token: Int32, _ state: UnsafeMutablePointer<UInt64>) -> UInt32
 
+@_silgen_name("notify_cancel")
+private func notify_cancel(_ token: Int32) -> UInt32
+
 // IOMessage.h macros are not visible to Swift. These match iokit_common_msg values.
 private let ioMessageCanSystemSleep: UInt32 = 0xE000_0270
 private let ioMessageSystemWillSleep: UInt32 = 0xE000_0280
@@ -601,15 +640,24 @@ private final class ScreenWakeHub: NSObject {
         registerSystemPower()
     }
 
+    deinit {
+        NSWorkspace.shared.notificationCenter.removeObserver(self)
+        DistributedNotificationCenter.default().removeObserver(self)
+        if displayNotifyToken != 0 { _ = notify_cancel(displayNotifyToken) }
+        if powerNotifier != 0 { IODeregisterForSystemPower(&powerNotifier) }
+        if powerPort != 0 { IOServiceClose(powerPort) }
+        if let notifyPort { IONotificationPortDestroy(notifyPort) }
+    }
+
     @objc private func handleWake(_ notification: Notification) {
         onWake()
     }
 
     private func registerDisplayStatus() {
-        notify_register_dispatch("com.apple.iokit.hid.displayStatus", &displayNotifyToken, .main) { [weak self] token in
+        _ = notify_register_dispatch("com.apple.iokit.hid.displayStatus", &displayNotifyToken, .main) { [weak self] token in
             guard let self else { return }
             var state: UInt64 = 0
-            notify_get_state(token, &state)
+            _ = notify_get_state(token, &state)
             if !self.primedDisplayStatus {
                 self.primedDisplayStatus = true
                 return

@@ -82,6 +82,9 @@ enum LKey: String {
     case cursorOffline, cursorTimeout, cursorUnreachable
     case claudeUnauthorized, claudeExpired, claudeAPIKey, claudeMissing, claudeUnreadable
     case claude429, claudeHTTP, claudeTemporary, claudeOffline, claudeTimeout, claudeUnreachable
+    case checkingUpdates, updateAvailable, upToDate, updateCheckFailed, openRelease
+    case pausedUpdates, staleReading, unavailable, lastAttempt, formatChanged, cursorConflict
+    case providerHelp, loginHelp, diagnostics, diagnosticsHelp, welcomeTitle, welcomeHelp, getStarted, releases
     case listSep, pair
 }
 
@@ -116,7 +119,13 @@ enum L10n {
         case "seven_day_haiku": return s(.haikuWeek)
         case "extra_usage": return s(.extraUsage)
         default:
-            if window.id.hasPrefix("extra") { return s(.otherQuota) }
+            if window.id.hasPrefix("extra-") {
+                if window.id.hasSuffix("primary") || window.id.hasSuffix("secondary") {
+                    let role = window.id.hasSuffix("primary") ? "primary" : "secondary"
+                    return window.title + " · " + duration(window.windowSeconds, id: role)
+                }
+                return window.title
+            }
             if window.id == "primary" || window.id == "secondary" {
                 return duration(window.windowSeconds, id: window.id)
             }
@@ -179,6 +188,25 @@ enum L10n {
 }
 
 private let en: [LKey: String] = [
+    .checkingUpdates: "Checking releases…",
+    .updateAvailable: "Version %@ is available.",
+    .upToDate: "You have the latest released version or a newer build.",
+    .updateCheckFailed: "Could not check for updates. You can open Releases manually.",
+    .openRelease: "Open Releases",
+    .pausedUpdates: "Updates paused",
+    .staleReading: "Historical reading",
+    .unavailable: "Unavailable",
+    .lastAttempt: "Last attempt: %@",
+    .formatChanged: "The usage response format has changed. See login help or report a compatibility issue.",
+    .cursorConflict: "Cursor's message disagrees with the numeric budget. The numeric fields are shown.",
+    .providerHelp: "Enable each service separately. Paused services keep their last reading in the panel and are hidden from menu bar quota indicators. Manual refresh also respects these switches.",
+    .loginHelp: "Login help",
+    .diagnostics: "Export diagnostics…",
+    .diagnosticsHelp: "Exports service states, times and window counts. No tokens, account identifiers, emails, conversation contents or usage values are included.",
+    .welcomeTitle: "Welcome to MacTokenGauge",
+    .welcomeHelp: "Choose the services you use. ChatGPT reads CODEX_HOME/auth.json (normally ~/.codex/auth.json); Cursor reads its local state database; Claude reads local credentials or its Keychain entry. Tokens go only to the corresponding service. Local Codex logs are used only when they explicitly identify the current account. No login files are changed.",
+    .getStarted: "Get started",
+    .releases: "Check releases…",
     .settingsWindow: "MacTokenGauge",
     .settings: "Settings",
     .closeWindow: "Close Window",
@@ -347,6 +375,25 @@ private let en: [LKey: String] = [
 ]
 
 private let zh: [LKey: String] = [
+    .checkingUpdates: "正在检查新版本……",
+    .updateAvailable: "发现新版本 %@。",
+    .upToDate: "当前已是最新发布版本，或较新的构建版本。",
+    .updateCheckFailed: "无法检查新版本，可手动查看 Releases。",
+    .openRelease: "打开 Releases",
+    .pausedUpdates: "已暂停更新",
+    .staleReading: "历史读数",
+    .unavailable: "暂无可用数据",
+    .lastAttempt: "最后尝试：%@",
+    .formatChanged: "用量接口格式发生变化。请查看登录帮助，或反馈兼容问题。",
+    .cursorConflict: "Cursor 文案与结构化金额不一致，当前采用结构化数字。",
+    .providerHelp: "分别启用你使用的服务。暂停后，弹窗保留最后读数，菜单栏隐藏该服务的额度指示。手动刷新也遵循这些开关。",
+    .loginHelp: "登录帮助",
+    .diagnostics: "导出诊断信息……",
+    .diagnosticsHelp: "仅导出服务状态、时间和窗口数量，不含令牌、账户标识、邮箱、对话内容或用量数值。",
+    .welcomeTitle: "欢迎使用 MacTokenGauge",
+    .welcomeHelp: "请选择你使用的服务。ChatGPT 读取 CODEX_HOME 下的 auth.json，默认位于 ~/.codex；Cursor 读取本地状态数据库；Claude 读取本地凭据文件或钥匙串条目。令牌仅发送至对应服务。本地 Codex 日志须能明确匹配当前账户才会使用。应用不会修改登录文件。",
+    .getStarted: "开始使用",
+    .releases: "查看新版本……",
     .settingsWindow: "MacTokenGauge",
     .settings: "设置",
     .closeWindow: "关闭窗口",
@@ -515,6 +562,25 @@ private let zh: [LKey: String] = [
 ]
 
 private let fr: [LKey: String] = [
+    .checkingUpdates: "Recherche de versions…",
+    .updateAvailable: "La version %@ est disponible.",
+    .upToDate: "Vous avez la dernière version publiée ou une version plus récente.",
+    .updateCheckFailed: "Impossible de vérifier les mises à jour. Consultez les versions manuellement.",
+    .openRelease: "Ouvrir les versions",
+    .pausedUpdates: "Actualisation suspendue",
+    .staleReading: "Ancien relevé",
+    .unavailable: "Données indisponibles",
+    .lastAttempt: "Dernière tentative : %@",
+    .formatChanged: "Le format de la réponse a changé. Consultez l’aide à la connexion ou signalez un problème de compatibilité.",
+    .cursorConflict: "Le message de Cursor diffère du budget numérique. Les valeurs numériques sont affichées.",
+    .providerHelp: "Activez chaque service séparément. Les services suspendus conservent leur dernier relevé dans le panneau et disparaissent des indicateurs de quota de la barre des menus. L’actualisation manuelle respecte aussi ces choix.",
+    .loginHelp: "Aide à la connexion",
+    .diagnostics: "Exporter les diagnostics…",
+    .diagnosticsHelp: "Exporte les états, les heures et le nombre de fenêtres. Aucun jeton, identifiant de compte, e-mail, contenu de conversation ou valeur d’utilisation n’est inclus.",
+    .welcomeTitle: "Bienvenue dans MacTokenGauge",
+    .welcomeHelp: "Choisissez vos services. ChatGPT lit CODEX_HOME/auth.json, normalement ~/.codex/auth.json ; Cursor lit sa base locale ; Claude lit les identifiants locaux ou le trousseau. Chaque jeton est envoyé uniquement au service correspondant. Les journaux Codex doivent identifier explicitement le compte actuel. Aucun fichier de connexion n’est modifié.",
+    .getStarted: "Commencer",
+    .releases: "Vérifier les mises à jour…",
     .settingsWindow: "MacTokenGauge",
     .settings: "Réglages",
     .closeWindow: "Fermer la fenêtre",
@@ -683,6 +749,25 @@ private let fr: [LKey: String] = [
 ]
 
 private let es: [LKey: String] = [
+    .checkingUpdates: "Buscando versiones…",
+    .updateAvailable: "La versión %@ está disponible.",
+    .upToDate: "Tienes la última versión publicada o una compilación más reciente.",
+    .updateCheckFailed: "No se pudo buscar actualizaciones. Puedes consultar las versiones manualmente.",
+    .openRelease: "Abrir versiones",
+    .pausedUpdates: "Actualizaciones pausadas",
+    .staleReading: "Lectura anterior",
+    .unavailable: "Datos no disponibles",
+    .lastAttempt: "Último intento: %@",
+    .formatChanged: "El formato de la respuesta ha cambiado. Consulta la ayuda de inicio de sesión o informa del problema de compatibilidad.",
+    .cursorConflict: "El mensaje de Cursor difiere del presupuesto numérico. Se muestran los campos numéricos.",
+    .providerHelp: "Activa cada servicio por separado. Los servicios pausados conservan su última lectura en el panel y se ocultan en los indicadores de cuota de la barra de menús. La actualización manual también respeta estos ajustes.",
+    .loginHelp: "Ayuda para iniciar sesión",
+    .diagnostics: "Exportar diagnóstico…",
+    .diagnosticsHelp: "Exporta estados, horas y cantidades de ventanas. No incluye tokens, identificadores de cuenta, correos, conversaciones ni valores de uso.",
+    .welcomeTitle: "Bienvenido a MacTokenGauge",
+    .welcomeHelp: "Elige los servicios que utilizas. ChatGPT lee CODEX_HOME/auth.json, normalmente ~/.codex/auth.json; Cursor lee su base de datos local; Claude lee las credenciales locales o el llavero. Los tokens solo se envían al servicio correspondiente. Los registros de Codex deben identificar explícitamente la cuenta actual. No se modifican archivos de inicio de sesión.",
+    .getStarted: "Comenzar",
+    .releases: "Buscar actualizaciones…",
     .settingsWindow: "MacTokenGauge",
     .settings: "Ajustes",
     .closeWindow: "Cerrar ventana",
@@ -851,6 +936,25 @@ private let es: [LKey: String] = [
 ]
 
 private let ru: [LKey: String] = [
+    .checkingUpdates: "Проверка обновлений…",
+    .updateAvailable: "Доступна версия %@.",
+    .upToDate: "У вас последняя опубликованная версия или более новая сборка.",
+    .updateCheckFailed: "Не удалось проверить обновления. Можно открыть страницу выпусков вручную.",
+    .openRelease: "Открыть выпуски",
+    .pausedUpdates: "Обновление приостановлено",
+    .staleReading: "Предыдущее значение",
+    .unavailable: "Данные недоступны",
+    .lastAttempt: "Последняя попытка: %@",
+    .formatChanged: "Формат ответа изменился. Посмотрите справку по входу или сообщите о проблеме совместимости.",
+    .cursorConflict: "Текст Cursor расходится с числовыми данными бюджета. Показаны числовые данные.",
+    .providerHelp: "Включайте сервисы отдельно. Приостановленные сервисы сохраняют последнее значение в панели и скрываются из индикаторов квоты в строке меню. Ручное обновление также учитывает эти переключатели.",
+    .loginHelp: "Помощь со входом",
+    .diagnostics: "Экспорт диагностики…",
+    .diagnosticsHelp: "Экспортируются состояния, время и количество окон. Токены, идентификаторы аккаунтов, почта, разговоры и значения использования не включаются.",
+    .welcomeTitle: "Добро пожаловать в MacTokenGauge",
+    .welcomeHelp: "Выберите используемые сервисы. ChatGPT читает CODEX_HOME/auth.json, обычно ~/.codex/auth.json; Cursor читает локальную базу; Claude читает локальные учётные данные или Связку ключей. Каждый токен отправляется только соответствующему сервису. Журналы Codex должны явно указывать текущий аккаунт. Файлы входа не изменяются.",
+    .getStarted: "Начать",
+    .releases: "Проверить обновления…",
     .settingsWindow: "MacTokenGauge",
     .settings: "Настройки",
     .closeWindow: "Закрыть окно",
@@ -1019,6 +1123,25 @@ private let ru: [LKey: String] = [
 ]
 
 private let ar: [LKey: String] = [
+    .checkingUpdates: "جارٍ البحث عن تحديثات…",
+    .updateAvailable: "الإصدار %@ متاح.",
+    .upToDate: "لديك أحدث إصدار منشور أو نسخة أحدث.",
+    .updateCheckFailed: "تعذر البحث عن تحديثات. يمكنك فتح صفحة الإصدارات يدويًا.",
+    .openRelease: "فتح الإصدارات",
+    .pausedUpdates: "التحديثات متوقفة مؤقتًا",
+    .staleReading: "قراءة سابقة",
+    .unavailable: "البيانات غير متاحة",
+    .lastAttempt: "آخر محاولة: %@",
+    .formatChanged: "تغير تنسيق استجابة الاستخدام. راجع مساعدة تسجيل الدخول أو أبلغ عن مشكلة التوافق.",
+    .cursorConflict: "تختلف رسالة Cursor عن بيانات الميزانية الرقمية. تُعرض البيانات الرقمية.",
+    .providerHelp: "فعّل كل خدمة على حدة. تحتفظ الخدمات المتوقفة بآخر قراءة في اللوحة وتُخفى من مؤشرات الحصة في شريط القوائم. يحترم التحديث اليدوي هذه الخيارات أيضًا.",
+    .loginHelp: "مساعدة تسجيل الدخول",
+    .diagnostics: "تصدير معلومات التشخيص…",
+    .diagnosticsHelp: "يُصدّر حالات الخدمات والأوقات وعدد النوافذ فقط، دون رموز الدخول أو معرفات الحسابات أو البريد أو المحادثات أو قيم الاستخدام.",
+    .welcomeTitle: "مرحبًا بك في MacTokenGauge",
+    .welcomeHelp: "اختر الخدمات التي تستخدمها. يقرأ ChatGPT ملف CODEX_HOME/auth.json، وعادةً ~/.codex/auth.json؛ ويقرأ Cursor قاعدة بياناته المحلية؛ ويقرأ Claude بيانات الدخول المحلية أو سلسلة المفاتيح. يُرسل كل رمز إلى خدمته فقط. لا تُستخدم سجلات Codex إلا إذا حددت الحساب الحالي صراحةً. لا تُعدّل ملفات الدخول.",
+    .getStarted: "ابدأ الاستخدام",
+    .releases: "البحث عن تحديثات…",
     .settingsWindow: "MacTokenGauge",
     .settings: "الإعدادات",
     .closeWindow: "إغلاق النافذة",
