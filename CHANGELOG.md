@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.4.0 (unreleased)
+## 1.4.0 (2026-10-04)
 
 - Parse ChatGPT main limits by explicit endpoint paths and keep additional limits separate with stable IDs.
 - Preserve the last official reading on failure, record the latest attempt and error, and mark it historical.
