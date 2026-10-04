@@ -12,14 +12,14 @@ jobs:
     env:
       DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
       - name: Toolchain
         run: xcodebuild -version
       - name: Regression tests (no real credentials or network)
         run: swift test
       - name: Build and verify free distribution package
         run: scripts/package.sh dist
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7.0.1
         with:
           name: MacTokenGauge-ad-hoc
           path: dist/
