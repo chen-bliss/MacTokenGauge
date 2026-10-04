@@ -1,4 +1,5 @@
 import Foundation
+import CoreFoundation
 
 enum CursorAccountLoader {
     static func load() async -> ProviderAccount {
@@ -6,6 +7,12 @@ enum CursorAccountLoader {
             return account(status: L10n.s(.cursorNoLogin))
         }
 
+        var result = await loadAuthenticated(session: session)
+        result.accountIdentity = AccountIdentity.fingerprint(session.userID ?? session.email ?? session.accessToken)
+        return result
+    }
+
+    private static func loadAuthenticated(session: CursorAuthReader.Session) async -> ProviderAccount {
         do {
             let parsed = try await CursorUsageClient.fetch(session: session)
             return ProviderAccount(
@@ -18,8 +25,17 @@ enum CursorAccountLoader {
                 status: parsed.windows.isEmpty ? L10n.s(.cursorEmpty) : L10n.s(.official),
                 capturedAt: Date(),
                 creditsBalance: nil,
-                note: parsed.note
+                note: parsed.note,
+                state: parsed.windows.isEmpty ? .failed : .current,
+                attemptedAt: Date(),
+                accountIdentity: AccountIdentity.fingerprint(session.userID ?? session.email ?? session.accessToken)
             )
+        } catch UsageClientError.rateLimited(let date) {
+            var result = account(status: L10n.f(.cursorHTTP, 429), email: session.email)
+            result.retryAfter = date
+            return result
+        } catch UsageClientError.unrecognized {
+            return account(status: L10n.s(.formatChanged), email: session.email)
         } catch UsageClientError.unauthorized {
             return account(status: L10n.s(.cursorUnauthorized), email: session.email)
         } catch UsageClientError.transport(let error) {
@@ -42,7 +58,9 @@ enum CursorAccountLoader {
             status: status,
             capturedAt: nil,
             creditsBalance: nil,
-            note: nil
+            note: nil,
+            state: .failed,
+            attemptedAt: Date()
         )
     }
 
@@ -144,15 +162,25 @@ enum CursorUsageClient {
     struct Parsed: Sendable {
         var windows: [UsageWindow]
         var note: String?
+        var onDemandDisabled: Bool = false
     }
 
-    static func fetch(session: CursorAuthReader.Session) async throws -> Parsed {
+    static func fetch(session: CursorAuthReader.Session, defaults: UserDefaults = .standard,
+                      sendRequest: @Sendable (URLRequest) async throws -> (Data, Int) = { try await send($0) }) async throws -> Parsed {
         var merged: [UsageWindow] = []
         var note: String?
         var last: Error = UsageClientError.unrecognized
-        for request in requests(for: session) {
+        let deadline = Date().addingTimeInterval(25)
+        let remembered = defaults.string(forKey: "cursorPreferredEndpoint")
+        let requests = requests(for: session).sorted { ($0.url?.path == remembered ? 0 : 1) < ($1.url?.path == remembered ? 0 : 1) }
+        var disabled = false
+        requestsLoop: for var request in requests {
+            try Task.checkCancellation()
+            let remaining = deadline.timeIntervalSinceNow
+            guard remaining > 0 else { break }
+            request.timeoutInterval = min(request.timeoutInterval, remaining)
             do {
-                let (data, code) = try await send(request)
+                let (data, code) = try await sendRequest(request)
                 switch code {
                 case 200:
                     guard let parsed = parse(data), !parsed.windows.isEmpty else {
@@ -161,20 +189,28 @@ enum CursorUsageClient {
                     }
                     merged = mergeWindows(merged, parsed.windows)
                     if note == nil { note = parsed.note }
+                    disabled = disabled || parsed.onDemandDisabled
                     let hasPlan = merged.contains { $0.id == "cursor-total" || $0.id == "cursor-auto" }
                     let hasOnDemand = merged.contains { $0.id == "cursor-ondemand" }
-                    if hasPlan && hasOnDemand { break }
+                    if hasPlan {
+                        defaults.set(request.url?.path, forKey: "cursorPreferredEndpoint")
+                    }
+                    if hasPlan && (hasOnDemand || disabled) { break requestsLoop }
                 case 401, 403:
                     last = UsageClientError.unauthorized
                 default:
                     last = UsageClientError.http(code)
                 }
-            } catch {
-                last = error
-            }
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch UsageClientError.rateLimited(let date) {
+                // Stop fallback requests on rate limiting, including to another host.
+                throw UsageClientError.rateLimited(date)
+            } catch { last = error }
         }
+        try Task.checkCancellation()
         guard !merged.isEmpty else { throw last }
-        return Parsed(windows: ordered(merged), note: note)
+        return Parsed(windows: ordered(merged), note: note, onDemandDisabled: disabled)
     }
 
     private static func mergeWindows(_ current: [UsageWindow], _ incoming: [UsageWindow]) -> [UsageWindow] {
@@ -257,33 +293,8 @@ enum CursorUsageClient {
     }
 
     private static func send(_ request: URLRequest) async throws -> (Data, Int) {
-        let data: Data
-        let response: URLResponse
-        do {
-            (data, response) = try await URLSession.shared.data(for: request)
-        } catch let error as URLError {
-            throw UsageClientError.transport(error)
-        }
-        guard let http = response as? HTTPURLResponse else { throw UsageClientError.unrecognized }
+        let (data, http) = try await UsageHTTP.send(request)
         return (data, http.statusCode)
-    }
-
-    static func selfCheck() {
-        let included = Data("""
-        {"displayMessage":"You've used 100% of your included usage","planUsage":{"includedSpend":2000,"remaining":0,"limit":2000,"autoPercentUsed":35,"apiPercentUsed":100},"spendLimitUsage":{"individualUsed":800,"individualLimit":5000}}
-        """.utf8)
-        let parsed = parse(included)
-        precondition(parsed?.windows.first { $0.id == "cursor-total" }?.usedPercent == 100)
-        precondition(parsed?.windows.first { $0.id == "cursor-auto" }?.usedPercent == 35)
-        let capped = parsed?.windows.first { $0.id == "cursor-ondemand" }
-        precondition(capped?.detail == nil)
-        precondition(abs((capped?.usedPercent ?? -1) - 16) < 0.01)
-
-        let open = Data("""
-        {"individualUsage":{"plan":{"used":10,"limit":100,"remaining":90,"autoPercentUsed":4},"onDemand":{"enabled":true,"used":2309,"limit":null}}}
-        """.utf8)
-        let extra = parse(open)?.windows.first { $0.id == "cursor-ondemand" }
-        precondition(extra?.detail == "$23.09")
     }
 
     static func parse(_ data: Data) -> Parsed? {
@@ -295,9 +306,7 @@ enum CursorUsageClient {
         var windows: [UsageWindow] = []
 
         if let plan {
-            if let message = json["displayMessage"] as? String, let used = percent(in: message) {
-                windows.append(window(id: "cursor-total", title: "本月", used: used, resetAt: resetAt, windowSeconds: windowSeconds))
-            } else if let used = includedUsedPercent(plan) {
+            if let used = includedUsedPercent(plan) {
                 windows.append(window(id: "cursor-total", title: "本月", used: used, resetAt: resetAt, windowSeconds: windowSeconds))
             } else if let total = JSONValues.number(plan["totalPercentUsed"]) {
                 windows.append(window(id: "cursor-total", title: "本月", used: total, resetAt: resetAt, windowSeconds: windowSeconds))
@@ -340,7 +349,14 @@ enum CursorUsageClient {
         }
 
         guard !windows.isEmpty else { return nil }
-        return Parsed(windows: windows, note: plan.flatMap(dollarNote))
+        var notes = [plan.flatMap(dollarNote)].compactMap { $0 }
+        if let plan, let numeric = includedUsedPercent(plan),
+           let message = json["displayMessage"] as? String, let textual = percent(in: message),
+           abs(numeric - textual) > 1 {
+            notes.append(L10n.s(.cursorConflict))
+        }
+        return Parsed(windows: windows, note: notes.isEmpty ? nil : notes.joined(separator: L10n.period),
+                      onDemandDisabled: onDemandDictionary(in: json)?["enabled"] as? Bool == false)
     }
 
     private static func planDictionary(in json: [String: Any]) -> [String: Any]? {
@@ -364,8 +380,8 @@ enum CursorUsageClient {
         return nil
     }
 
-    /// The sentence on Cursor's dashboard is included spend against the limit.
-    /// `totalPercentUsed` is a different meter and can stay low after that budget is gone.
+    /// Structured included-budget fields win over dashboard prose.
+    /// `totalPercentUsed` is used only when the included budget cannot be calculated.
     /// `remaining` wins when it is present, so a leftover included budget is not shown as empty.
     private static func includedUsedPercent(_ plan: [String: Any]) -> Double? {
         guard let limit = JSONValues.number(plan["limit"]), limit > 0 else { return nil }
@@ -398,13 +414,12 @@ enum CursorUsageClient {
     }
 
     private static func onDemandWindow(used: Double?, limit: Double?, resetAt: Date?, windowSeconds: TimeInterval?) -> UsageWindow? {
-        guard let used, used > 0 || (limit ?? 0) > 0 else { return nil }
+        guard let used, used >= 0 else { return nil }
         if let limit, limit > 0 {
             return window(id: "cursor-ondemand", title: "按量", used: used / limit * 100, resetAt: resetAt, windowSeconds: windowSeconds)
         }
-        var open = window(id: "cursor-ondemand", title: "按量", used: 0, resetAt: resetAt, windowSeconds: windowSeconds)
-        open.detail = "$\(money(used))"
-        return open
+        return UsageWindow(id: "cursor-ondemand", title: "按量", amount: Decimal(used) / 100,
+                           currency: "USD", resetAt: resetAt, windowSeconds: windowSeconds)
     }
 
     private static func spendLimitDictionary(in json: [String: Any]) -> [String: Any]? {
@@ -435,11 +450,12 @@ enum CursorUsageClient {
 
 enum JSONValues {
     static func number(_ any: Any?) -> Double? {
+        if let number = any as? NSNumber, CFGetTypeID(number) == CFBooleanGetTypeID() { return nil }
         switch any {
-        case let value as Double: return value
+        case let value as Double: return value.isFinite ? value : nil
         case let value as Int: return Double(value)
         case let value as NSNumber: return value.doubleValue
-        case let value as String: return Double(value)
+        case let value as String: return Double(value).flatMap { $0.isFinite ? $0 : nil }
         default: return nil
         }
     }

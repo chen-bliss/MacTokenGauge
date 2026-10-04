@@ -7,7 +7,7 @@ struct PopoverView: View {
 
     private var maxPanelHeight: CGFloat {
         let available = (NSScreen.main?.visibleFrame.height ?? 900) - 28
-        return min(860, max(560, available))
+        return min(860, max(240, available))
     }
 
     private var panelHeight: CGFloat {
@@ -128,11 +128,14 @@ private struct AccountSection: View {
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-                if let capturedAt = account.capturedAt {
-                    Text(UsageFormatting.updatedAgo(capturedAt, now: now))
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text(account.stateLabel)
+                    if let capturedAt = account.capturedAt {
+                        Text(UsageFormatting.updatedAgo(capturedAt, now: now))
+                    }
                 }
+                .font(.caption2)
+                .foregroundStyle(.secondary)
             }
             if let label = account.accountLabel, !label.isEmpty {
                 Text(label)
@@ -141,7 +144,7 @@ private struct AccountSection: View {
             }
 
             if account.windows.isEmpty {
-                Text(account.status)
+                Text(account.state == .paused ? account.stateLabel : account.status)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -150,16 +153,17 @@ private struct AccountSection: View {
                 LazyVGrid(columns: columns, spacing: 10) {
                     ForEach(account.windows) { window in
                         WindowCard(window: window, now: now)
+                            .opacity(account.showsLiveQuota ? 1 : 0.65)
                     }
                 }
-                if account.windows.contains(where: { $0.detail == nil && $0.remainingPercent <= 0 }) {
+                if account.showsLiveQuota && account.windows.contains(where: { $0.detail == nil && $0.remainingPercent <= 0 }) {
                     let names = account.windows.filter { $0.detail == nil && $0.remainingPercent <= 0 }.map { L10n.windowTitle($0) }.joined(separator: L10n.s(.listSep))
                     Text(L10n.f(.exhausted, names))
                         .font(.caption)
                         .foregroundStyle(gaugeColor(0))
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                if account.status != L10n.s(.official) {
+                if account.state != .current && account.state != .paused {
                     Text(account.status)
                         .font(.caption2)
                         .foregroundStyle(.secondary)
@@ -175,6 +179,17 @@ private struct AccountSection: View {
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
+            }
+            if let attempted = account.attemptedAt, account.state != .current {
+                Text(L10n.f(.lastAttempt, UsageFormatting.clock(attempted, now: now)))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            if [.failed, .stale, .local].contains(account.state) {
+                Button(L10n.s(.loginHelp)) {
+                    NSWorkspace.shared.open(URL(string: "https://github.com/chen-bliss/MacTokenGauge#service-setup")!)
+                }
+                .font(.caption)
             }
         }
         .padding(12)
@@ -244,6 +259,8 @@ private struct WindowCard: View {
                     .foregroundStyle(.tertiary)
             }
         }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(L10n.windowTitle(window)), \(window.displayValue)")
         .padding(.vertical, 10)
         .padding(.horizontal, 6)
         .frame(maxWidth: .infinity)

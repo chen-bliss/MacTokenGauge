@@ -5,14 +5,18 @@ struct CodexSession: Sendable {
     var accountID: String?
     var expiresAt: Date?
 
+    var identity: String {
+        accountID.map(AccountIdentity.fingerprint) ?? AccountIdentity.tokenFingerprint(accessToken)
+    }
+
     var isExpired: Bool {
         guard let expiresAt else { return false }
         return expiresAt.timeIntervalSinceNow < 60
     }
 }
 
-/// The installed ChatGPT.app (bundle id `com.openai.codex`) writes its login here,
-/// in `~/.codex/auth.json`. The gauge only reads that access token and asks
+/// Codex saves subscription login in CODEX_HOME/auth.json (normally ~/.codex/auth.json).
+/// The gauge only reads that access token and asks
 /// chatgpt.com for usage. It does not refresh the token or write the file back.
 enum CodexAuthReader {
     static func codexHome() -> URL {
@@ -41,13 +45,13 @@ enum CodexAuthReader {
             accountID: (tokens["account_id"] as? String) ?? accountID(in: accessToken),
             expiresAt: expiry(in: accessToken)
         )
-        return session.isExpired ? .expired : .ready(session)
+        return session.isExpired ? .expired(session) : .ready(session)
     }
 
     enum LoadResult {
         case ready(CodexSession)
         case missing
-        case expired
+        case expired(CodexSession)
         case apiKeyOnly
         case unreadable
     }

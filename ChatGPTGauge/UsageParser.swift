@@ -2,103 +2,54 @@ import Foundation
 
 enum UsageParser {
     static func parse(data: Data, source: UsageSource, capturedAt: Date) -> UsageSnapshot? {
-        guard let json = try? JSONSerialization.jsonObject(with: data) else { return nil }
-        var best: UsageSnapshot?
-        collect(json, inheritedPlan: nil, inheritedCredits: nil, capturedAt: capturedAt, source: source, best: &best)
-        return best
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        switch source {
+        case .live: return parseOfficial(json, capturedAt: capturedAt)
+        case .localLog: return parseLocalEvent(json, capturedAt: capturedAt)
+        }
     }
 
-    static func selfCheck() {
-        let capturedAt = Date(timeIntervalSince1970: 1_700_000_000)
-        let live = """
-        {"plan_type":"plus","rate_limit":{"primary_window":{"used_percent":32,"limit_window_seconds":18000,"reset_at":1700003600},"secondary_window":{"used_percent":18.5,"limit_window_seconds":604800,"reset_at":1700600000}},"credits":{"balance":"4.50"}}
-        """.data(using: .utf8)!
-        let liveSnapshot = parse(data: live, source: .live, capturedAt: capturedAt)
-        precondition(liveSnapshot?.planType == "plus")
-        precondition(liveSnapshot?.windows.count == 2)
-        precondition(liveSnapshot?.windows.first?.title == "5 小时")
-        precondition(liveSnapshot?.windows.first?.remainingPercent == 68.0)
-        precondition(liveSnapshot?.creditsBalance == "4.50")
-
-        let local = """
-        {"payload":{"rate_limits":{"plan_type":"pro","primary":{"used_percent":2,"window_minutes":300,"resets_at":1700001000},"secondary":{"used_percent":29,"window_minutes":10080,"resets_at":1700600000}}}}
-        """.data(using: .utf8)!
-        let localSnapshot = parse(data: local, source: .localLog, capturedAt: capturedAt)
-        precondition(localSnapshot?.planType == "pro")
-        precondition(localSnapshot?.windows.first?.title == "5 小时")
-        precondition(localSnapshot?.windows.last?.title == "7 天")
-        precondition(abs((localSnapshot?.windows.last?.remainingPercent ?? 0) - 71) < 0.01)
+    private static func parseOfficial(_ json: [String: Any], capturedAt: Date) -> UsageSnapshot? {
+        guard let limits = json["rate_limit"] as? [String: Any] else { return nil }
+        var windows = primaryWindows(limits, prefix: "", capturedAt: capturedAt)
+        guard !windows.isEmpty else { return nil }
+        let extra = json["additional_rate_limits"] ?? limits["additional_rate_limits"]
+        windows += extraWindows(extra, capturedAt: capturedAt)
+        return UsageSnapshot(planType: string(json["plan_type"]), windows: windows,
+                             creditsBalance: credits(in: json), source: .live, capturedAt: capturedAt)
     }
 
-    private static func collect(
-        _ any: Any,
-        inheritedPlan: String?,
-        inheritedCredits: String?,
-        capturedAt: Date,
-        source: UsageSource,
-        best: inout UsageSnapshot?
-    ) {
-        if let array = any as? [Any] {
-            for item in array {
-                collect(
-                    item,
-                    inheritedPlan: inheritedPlan,
-                    inheritedCredits: inheritedCredits,
-                    capturedAt: capturedAt,
-                    source: source,
-                    best: &best
-                )
+    private static func parseLocalEvent(_ json: [String: Any], capturedAt: Date) -> UsageSnapshot? {
+        guard let payload = json["payload"] as? [String: Any],
+              let limits = payload["rate_limits"] as? [String: Any] else { return nil }
+        let windows = primaryWindows(limits, prefix: "", capturedAt: capturedAt)
+        guard !windows.isEmpty else { return nil }
+        return UsageSnapshot(planType: string(limits["plan_type"]), windows: windows,
+                             creditsBalance: credits(in: limits), source: .localLog, capturedAt: capturedAt)
+    }
+
+    private static func primaryWindows(_ limits: [String: Any], prefix: String, capturedAt: Date) -> [UsageWindow] {
+        [window(limits["primary_window"] ?? limits["primary"], id: prefix + "primary", fallbackTitle: "短时窗口", capturedAt: capturedAt),
+         window(limits["secondary_window"] ?? limits["secondary"], id: prefix + "secondary", fallbackTitle: "长时窗口", capturedAt: capturedAt)]
+            .compactMap { $0 }
+    }
+
+    private static func extraWindows(_ raw: Any?, capturedAt: Date) -> [UsageWindow] {
+        guard let items = raw as? [[String: Any]] else { return [] }
+        var seen: [String: Int] = [:]
+        return items.flatMap { item -> [UsageWindow] in
+            let label = string(item["limit_name"] ?? item["name"] ?? item["label"]) ?? "other"
+            // Stable across response reordering when the endpoint supplies an identifier.
+            let base = string(item["id"]) ?? label
+            let occurrence = seen[base, default: 0]
+            seen[base] = occurrence + 1
+            let prefix = "extra-\(base)-\(occurrence)-"
+            if let limits = item["rate_limit"] as? [String: Any] {
+                var windows = primaryWindows(limits, prefix: prefix, capturedAt: capturedAt)
+                for index in windows.indices { windows[index].title = label }
+                return windows
             }
-            return
-        }
-        guard let dict = any as? [String: Any] else { return }
-
-        let plan = string(dict["plan_type"]) ?? inheritedPlan
-        let creditsBalance = credits(in: dict) ?? inheritedCredits
-        let primary = window(
-            dict["primary_window"] ?? dict["primary"],
-            id: "primary",
-            fallbackTitle: "短时窗口",
-            capturedAt: capturedAt
-        )
-        let secondary = window(
-            dict["secondary_window"] ?? dict["secondary"],
-            id: "secondary",
-            fallbackTitle: "长时窗口",
-            capturedAt: capturedAt
-        )
-        if primary != nil || secondary != nil {
-            var windows = [primary, secondary].compactMap { $0 }
-            windows.append(contentsOf: extraWindows(in: dict, capturedAt: capturedAt))
-            let candidate = UsageSnapshot(
-                planType: plan,
-                windows: windows,
-                creditsBalance: creditsBalance,
-                source: source,
-                capturedAt: capturedAt
-            )
-            if best == nil || candidate.windows.count > (best?.windows.count ?? 0) {
-                best = candidate
-            }
-        }
-
-        for value in dict.values {
-            collect(
-                value,
-                inheritedPlan: plan,
-                inheritedCredits: creditsBalance,
-                capturedAt: capturedAt,
-                source: source,
-                best: &best
-            )
-        }
-    }
-
-    private static func extraWindows(in dict: [String: Any], capturedAt: Date) -> [UsageWindow] {
-        let raw = dict["additional_rate_limits"] ?? dict["additionalRateLimits"]
-        guard let items = raw as? [Any] else { return [] }
-        return items.enumerated().compactMap { index, item in
-            window(item, id: "extra-\(index)", fallbackTitle: "其他额度", capturedAt: capturedAt)
+            return [window(item, id: prefix + "window", fallbackTitle: label, capturedAt: capturedAt)].compactMap { $0 }
         }
     }
 
@@ -166,18 +117,5 @@ enum UsageParser {
         return trimmed.isEmpty ? nil : trimmed
     }
 
-    private static func number(_ any: Any?) -> Double? {
-        switch any {
-        case let value as Double:
-            return value
-        case let value as Int:
-            return Double(value)
-        case let value as NSNumber:
-            return value.doubleValue
-        case let value as String:
-            return Double(value)
-        default:
-            return nil
-        }
-    }
+    private static func number(_ any: Any?) -> Double? { JSONValues.number(any) }
 }

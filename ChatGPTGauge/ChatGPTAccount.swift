@@ -6,12 +6,26 @@ enum ChatGPTAccountLoader {
 
         var live: UsageSnapshot?
         var problem: String?
+        var retryAfter: Date?
+        var accountID: String?
+        var identity: String?
+        switch auth {
+        case .ready(let session), .expired(let session):
+            accountID = session.accountID
+            identity = session.identity
+        default: break
+        }
 
         if includeLive {
             switch auth {
             case .ready(let session):
                 do {
                     live = try await UsageClient.fetch(session: session)
+                } catch UsageClientError.rateLimited(let date) {
+                    retryAfter = date
+                    problem = L10n.f(.gptHTTP, 429)
+                } catch UsageClientError.unrecognized {
+                    problem = L10n.s(.formatChanged)
                 } catch UsageClientError.unauthorized {
                     problem = L10n.s(.gptUnauthorized)
                 } catch UsageClientError.transport(let error) {
@@ -33,11 +47,13 @@ enum ChatGPTAccountLoader {
         }
 
         if let live {
-            return make(from: live, status: L10n.s(.official))
+            return make(from: live, status: L10n.s(.official), identity: identity)
         }
-        let local = await Task.detached(priority: .utility) { SessionLogReader.latestSnapshot() }.value
+        let local = await SessionLogReader.latestSnapshot(accountID: accountID)
         if let local {
-            return make(from: local, status: problem ?? L10n.s(.localCodex))
+            var result = make(from: local, status: problem ?? L10n.s(.localCodex), identity: identity)
+            result.retryAfter = retryAfter
+            return result
         }
         return ProviderAccount(
             id: "chatgpt",
@@ -50,11 +66,15 @@ enum ChatGPTAccountLoader {
             capturedAt: nil,
             creditsBalance: nil,
             note: nil,
-            origin: .localLog
+            origin: .localLog,
+            state: .failed,
+            attemptedAt: Date(),
+            accountIdentity: identity,
+            retryAfter: retryAfter
         )
     }
 
-    private static func make(from snapshot: UsageSnapshot, status: String) -> ProviderAccount {
+    private static func make(from snapshot: UsageSnapshot, status: String, identity: String?) -> ProviderAccount {
         ProviderAccount(
             id: "chatgpt",
             name: "ChatGPT",
@@ -66,7 +86,10 @@ enum ChatGPTAccountLoader {
             capturedAt: snapshot.capturedAt,
             creditsBalance: snapshot.creditsBalance,
             note: snapshot.source == .localLog ? L10n.s(.localNote) : nil,
-            origin: snapshot.source
+            origin: snapshot.source,
+            state: snapshot.source == .live ? .current : .local,
+            attemptedAt: Date(),
+            accountIdentity: identity
         )
     }
 

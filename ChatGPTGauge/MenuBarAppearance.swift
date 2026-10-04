@@ -107,9 +107,10 @@ enum ColorHex {
 struct ResolvedBar: Identifiable {
     var id: UUID
     var title: String
-    var fraction: Double
+    var fraction: Double?
     var color: Color
     var caption: String
+    var marker: String? = nil
 }
 
 enum BarResolver {
@@ -126,7 +127,8 @@ enum BarResolver {
                 title: BarTarget.title(for: slot.target, accounts: accounts),
                 fraction: match.fraction,
                 color: ColorHex.color(from: slot.colorHex),
-                caption: match.caption
+                caption: match.caption,
+                marker: match.marker
             )
         }
     }
@@ -136,23 +138,26 @@ enum BarResolver {
         accounts: [ProviderAccount],
         battery: BatteryReading?,
         now: Date
-    ) -> (fraction: Double, caption: String) {
+    ) -> (fraction: Double?, caption: String, marker: String?) {
         if target == "battery" {
-            guard let battery else { return (0, L10n.s(.noBatteryData)) }
+            guard let battery else { return (nil, L10n.s(.noBatteryData), "?") }
             let state = battery.charging ? L10n.s(.charging) : L10n.s(.onBattery)
-            return (Double(battery.percent) / 100, L10n.f(.batteryStateLine, battery.percent, state))
+            return (Double(battery.percent) / 100, L10n.f(.batteryStateLine, battery.percent, state), nil)
         }
         let parts = target.split(separator: ".", maxSplits: 1).map(String.init)
         guard parts.count == 2,
               let account = accounts.first(where: { $0.id == parts[0] }),
               let window = account.windows.first(where: { $0.id == parts[1] }) else {
-            return (0, L10n.s(.noSlotData))
+            return (nil, L10n.s(.noSlotData), "?")
         }
+        guard account.showsLiveQuota else { return (nil, account.stateLabel + L10n.period + account.status, "?") }
+        if let amount = window.detail { return (nil, amount, "$" ) }
         let remain = L10n.f(.remainLine, Int(window.remainingPercent.rounded()))
-        guard let resetAt = window.resetAt else { return (window.remainingPercent / 100, remain) }
+        guard let resetAt = window.resetAt else { return (window.remainingPercent / 100, remain, nil) }
         return (
             window.remainingPercent / 100,
-            [remain, UsageFormatting.longCountdown(until: resetAt, now: now), UsageFormatting.clock(resetAt, now: now)].joined(separator: L10n.period)
+            [remain, UsageFormatting.longCountdown(until: resetAt, now: now), UsageFormatting.clock(resetAt, now: now)].joined(separator: L10n.period),
+            nil
         )
     }
 }
@@ -216,10 +221,21 @@ enum MenuBarIconImage {
             guard !bars.isEmpty else { return }
             for (index, bar) in bars.enumerated() {
                 let y = height - line - CGFloat(index) * (line + gap)
-                let fraction = min(1, max(0, bar.fraction))
+                guard let value = bar.fraction else {
+                    let path = NSBezierPath()
+                    path.move(to: NSPoint(x: 0, y: y + line / 2))
+                    path.line(to: NSPoint(x: width, y: y + line / 2))
+                    path.lineWidth = line
+                    path.setLineDash([2, 2], count: 2, phase: 0)
+                    nsColor(bar.color).withAlphaComponent(0.45).setStroke()
+                    path.stroke()
+                    continue
+                }
+                let fraction = min(1, max(0, value))
                 let track = NSRect(x: 0, y: y, width: width, height: line)
                 nsColor(bar.color).withAlphaComponent(0.28).setFill()
                 NSBezierPath(roundedRect: track, xRadius: line / 2, yRadius: line / 2).fill()
+                guard fraction > 0 else { continue }
                 let fillWidth = max(line, width * fraction)
                 let fill = NSRect(x: 0, y: y, width: fillWidth, height: line)
                 nsColor(bar.color).setFill()
@@ -254,7 +270,7 @@ enum MenuBarIconImage {
                 let origin = CGFloat(index) * (side + gap)
                 let center = NSPoint(x: origin + side / 2, y: side / 2)
                 let color = bars.indices.contains(index) ? nsColor(bars[index].color) : NSColor.tertiaryLabelColor
-                let fraction = bars.indices.contains(index) ? bars[index].fraction : 0
+                let fraction = bars.indices.contains(index) ? bars[index].fraction : nil
                 strokeRing(
                     center: center,
                     radius: side / 2 - 1.5,
@@ -263,6 +279,10 @@ enum MenuBarIconImage {
                     color: color,
                     track: color.withAlphaComponent(0.28)
                 )
+                if bars.indices.contains(index), let marker = bars[index].marker {
+                    (marker as NSString).draw(at: NSPoint(x: center.x - 3, y: center.y - 5),
+                        withAttributes: [.font: NSFont.systemFont(ofSize: 8), .foregroundColor: color])
+                }
             }
         }
     }
@@ -271,8 +291,8 @@ enum MenuBarIconImage {
         let side: CGFloat = 18
         return draw(width: side, height: side) { rect in
             let center = NSPoint(x: rect.midX, y: rect.midY)
-            let items: [(Double, NSColor)] = bars.isEmpty
-                ? [(0, .tertiaryLabelColor)]
+            let items: [(Double?, NSColor)] = bars.isEmpty
+                ? [(nil, .tertiaryLabelColor)]
                 : bars.map { ($0.fraction, nsColor($0.color)) }
             let outer = side / 2 - 1
             let count = CGFloat(items.count)
@@ -297,16 +317,18 @@ enum MenuBarIconImage {
         center: NSPoint,
         radius: CGFloat,
         line: CGFloat,
-        fraction: Double,
+        fraction: Double?,
         color: NSColor,
         track: NSColor
     ) {
         let outline = NSBezierPath()
         outline.appendArc(withCenter: center, radius: radius, startAngle: 0, endAngle: 360, clockwise: false)
         outline.lineWidth = line
+        if fraction == nil { outline.setLineDash([2, 2], count: 2, phase: 0) }
         track.setStroke()
         outline.stroke()
 
+        guard let fraction else { return }
         let amount = min(1, max(0, fraction))
         guard amount > 0.01 else { return }
         let arc = NSBezierPath()

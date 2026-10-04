@@ -5,6 +5,7 @@ enum UsageClientError: Error {
     case unrecognized
     case http(Int)
     case transport(URLError)
+    case rateLimited(Date)
 }
 
 enum UsageClient {
@@ -23,15 +24,7 @@ enum UsageClient {
             request.setValue(accountID, forHTTPHeaderField: "ChatGPT-Account-Id")
         }
 
-        let data: Data
-        let response: URLResponse
-        do {
-            (data, response) = try await URLSession.shared.data(for: request)
-        } catch let error as URLError {
-            throw UsageClientError.transport(error)
-        }
-
-        guard let http = response as? HTTPURLResponse else { throw UsageClientError.unrecognized }
+        let (data, http) = try await UsageHTTP.send(request)
         switch http.statusCode {
         case 200:
             guard let snapshot = UsageParser.parse(data: data, source: .live, capturedAt: Date()) else {

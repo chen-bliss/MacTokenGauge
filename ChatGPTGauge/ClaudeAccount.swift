@@ -5,39 +5,54 @@ enum ClaudeAccountLoader {
     static func load() async -> ProviderAccount {
         switch ClaudeAuthReader.load() {
         case .ready(let session):
-            do {
-                let snapshot = try await ClaudeUsageClient.fetch(session: session)
-                return ProviderAccount(
-                    id: "claude",
-                    name: "Claude",
-                    menuTitle: "Claude",
-                    plan: "Claude",
-                    accountLabel: nil,
-                    windows: snapshot.windows,
-                    status: L10n.s(.official),
-                    capturedAt: snapshot.capturedAt,
-                    creditsBalance: nil,
-                    note: nil
-                )
-            } catch UsageClientError.unauthorized {
-                return empty(L10n.s(.claudeUnauthorized))
-            } catch UsageClientError.transport(let error) {
-                return empty(transport(error))
-            } catch UsageClientError.http(let code) where code == 429 {
-                return empty(L10n.s(.claude429))
-            } catch UsageClientError.http(let code) {
-                return empty(L10n.f(.claudeHTTP, code))
-            } catch {
-                return empty(L10n.s(.claudeTemporary))
-            }
-        case .expired:
-            return empty(L10n.s(.claudeExpired))
-        case .apiKeyOnly:
-            return empty(L10n.s(.claudeAPIKey))
-        case .missing:
-            return empty(L10n.s(.claudeMissing))
-        case .unreadable:
-            return empty(L10n.s(.claudeUnreadable))
+            var result = await loadAuthenticated(session: session)
+            result.accountIdentity = AccountIdentity.tokenFingerprint(session.accessToken)
+            return result
+        case .expired(let session):
+            var result = empty(L10n.s(.claudeExpired))
+            result.accountIdentity = AccountIdentity.tokenFingerprint(session.accessToken)
+            return result
+        case .apiKeyOnly: return empty(L10n.s(.claudeAPIKey))
+        case .missing: return empty(L10n.s(.claudeMissing))
+        case .unreadable: return empty(L10n.s(.claudeUnreadable))
+        }
+    }
+
+    private static func loadAuthenticated(session: ClaudeAuthReader.Session) async -> ProviderAccount {
+        do {
+            let snapshot = try await ClaudeUsageClient.fetch(session: session)
+            return ProviderAccount(
+                id: "claude",
+                name: "Claude",
+                menuTitle: "Claude",
+                plan: "Claude",
+                accountLabel: nil,
+                windows: snapshot.windows,
+                status: L10n.s(.official),
+                capturedAt: snapshot.capturedAt,
+                creditsBalance: nil,
+                note: nil,
+                state: .current,
+                attemptedAt: Date(),
+                accountIdentity: AccountIdentity.tokenFingerprint(session.accessToken)
+            )
+        } catch UsageClientError.rateLimited(let date) {
+            var result = empty(L10n.s(.claude429))
+            result.retryAfter = date
+            result.accountIdentity = AccountIdentity.tokenFingerprint(session.accessToken)
+            return result
+        } catch UsageClientError.unrecognized {
+            return empty(L10n.s(.formatChanged))
+        } catch UsageClientError.unauthorized {
+            return empty(L10n.s(.claudeUnauthorized))
+        } catch UsageClientError.transport(let error) {
+            return empty(transport(error))
+        } catch UsageClientError.http(let code) where code == 429 {
+            return empty(L10n.s(.claude429))
+        } catch UsageClientError.http(let code) {
+            return empty(L10n.f(.claudeHTTP, code))
+        } catch {
+            return empty(L10n.s(.claudeTemporary))
         }
     }
 
@@ -52,7 +67,9 @@ enum ClaudeAccountLoader {
             status: status,
             capturedAt: nil,
             creditsBalance: nil,
-            note: nil
+            note: nil,
+            state: .failed,
+            attemptedAt: Date()
         )
     }
 
@@ -75,7 +92,7 @@ enum ClaudeAuthReader {
 
     enum LoadResult {
         case ready(Session)
-        case expired
+        case expired(Session)
         case apiKeyOnly
         case missing
         case unreadable
@@ -139,7 +156,7 @@ enum ClaudeAuthReader {
             let date = expires > 10_000_000_000
                 ? Date(timeIntervalSince1970: expires / 1000)
                 : Date(timeIntervalSince1970: expires)
-            if date.timeIntervalSinceNow < 60 { return .expired }
+            if date.timeIntervalSinceNow < 60 { return .expired(Session(accessToken: token)) }
         }
         return .ready(Session(accessToken: token))
     }
@@ -158,14 +175,7 @@ enum ClaudeUsageClient {
         // 不带这个标识时，用量接口会直接返回 429。
         request.setValue("claude-code/2.1.72", forHTTPHeaderField: "User-Agent")
 
-        let data: Data
-        let response: URLResponse
-        do {
-            (data, response) = try await URLSession.shared.data(for: request)
-        } catch let error as URLError {
-            throw UsageClientError.transport(error)
-        }
-        guard let http = response as? HTTPURLResponse else { throw UsageClientError.unrecognized }
+        let (data, http) = try await UsageHTTP.send(request)
         switch http.statusCode {
         case 200:
             guard let snapshot = parse(data) else { throw UsageClientError.unrecognized }

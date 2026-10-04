@@ -1,7 +1,7 @@
 import AppKit
 
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, ApplicationMenuRetitling {
     let monitor = UsageMonitor()
     private var status: StatusItemController?
 
@@ -11,6 +11,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         status = StatusItemController(monitor: monitor)
         monitor.start()
     }
+
+    func applicationWillTerminate(_ notification: Notification) { monitor.stop() }
 
     @objc func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         false
@@ -31,6 +33,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc func application(_ application: NSApplication, shouldRestoreApplicationState coder: NSCoder) -> Bool {
         false
     }
+
+    func retitleMenu() { AppMenu.install(target: self) }
 
     @objc func openSettings(_ sender: Any?) {
         SettingsPresenter.show(monitor: monitor)
