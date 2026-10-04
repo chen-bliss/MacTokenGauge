@@ -1,155 +1,139 @@
 # MacTokenGauge
 
-A macOS menu bar app that shows how much ChatGPT, Cursor, and Claude usage is left, when each window resets, and this Mac’s battery.
+A macOS menu bar app for ChatGPT, Cursor and Claude quota windows, reset times and battery status. macOS 14 or later; release builds support Apple silicon and Intel.
 
-macOS 菜单栏应用。用来看 ChatGPT、Cursor、Claude 还剩多少用量，每个窗口何时重置，以及这台 Mac 的电量。
+macOS 菜单栏额度工具，显示 ChatGPT、Cursor、Claude 的额度窗口、重置时间和本机电量。要求 macOS 14 或更高版本，构建包同时支持 Apple 芯片和 Intel。
 
-The downloadable disk image is on the [Releases](https://github.com/chen-bliss/MacTokenGauge/releases) page. It is built for Apple silicon and macOS 14 or later.
+[Downloads 下载](https://github.com/chen-bliss/MacTokenGauge/releases) · [Changelog](CHANGELOG.md) · [Contributing](CONTRIBUTING.md) · [MIT license](LICENSE)
 
-可下载的磁盘映像在 [Releases](https://github.com/chen-bliss/MacTokenGauge/releases) 页面。适用于 Apple 芯片，系统需要 macOS 14 或更高版本。
+## Preview
+
+Rendered from the actual SwiftUI panel with synthetic accounts, not live readings. The example shows a historical ChatGPT reading, Cursor quota and uncapped spend, and a paused Claude service.
+
+由实际 SwiftUI 界面使用模拟账户数据渲染，非真实账户读数。示例展示 ChatGPT 历史读数、Cursor 额度与无上限消费，以及暂停的 Claude 服务。
+
+<img src="docs/panel-zh.png" alt="MacTokenGauge panel with synthetic data" width="440">
+
+[English preview](docs/panel-en.png) · [Arabic preview](docs/panel-ar.png)
+
+Regenerate with `scripts/preview.sh` on a logged-in Mac with a graphical session. This renders fixtures through an injected loader and reads no service credentials.
 
 ## English
 
-### What it shows
+### Features and data states
 
-- ChatGPT usage is read from the official site on the refresh interval, using the login already saved by the ChatGPT app. A local record is used only before the site has returned a number, and it does not replace a successful official reading.
-- Cursor and Claude are read when “Read official usage” is on.
-- The menu bar can show text you edit, a battery icon or a battery percent, colored bars, one ring, several rings, or rings combined into one.
-- Display languages follow the system, or you can pick Arabic, Chinese, English, French, Russian, or Spanish.
-- Hold Command and drag the menu bar icon to place it among other apps. It can sit just to the left of Control Center. It cannot move the clock or Control Center.
-- Click outside the panel, or press Esc, to close it.
-- The app stays in the menu bar and does not keep a Dock icon. Open Settings from the panel. Command-Q closes the settings window and leaves the menu bar icon running. Use Quit in the panel to leave the app.
-- Once ChatGPT’s 5-hour window is used up, the app waits until that window resets before asking the site again. Claude’s 5-hour window works the same way. Cursor keeps the normal interval while Auto or on-demand can still change, and waits for the monthly reset only after those are used up as well.
-- Cursor’s month figure is the included budget. Auto is a separate percent, so the month can read 0% while Auto still has some left. On-demand spend appears in the panel: a percent when it has a cap, or a dollar amount when it does not.
-- The battery check interval is chosen in Settings, from 1 to 30 minutes. While Low Power Mode or a low-battery warning is on, usage checks, the menu bar clock, and battery reads slow down. They return to the intervals you chose when that ends.
-- Launching the app always refreshes usage once. Under the refresh interval, “Refresh when the screen turns on” also refreshes when the screen turns on, including when the lid is opened. Turning that off does not skip the refresh at launch.
-- When a window’s remaining share falls to the level you set, and some quota is still left, the app sends one notification for that reset cycle. If a check finds the window already used up, it does not notify.
+- Enable ChatGPT, Cursor and Claude independently. Manual refresh respects these switches. Paused services retain their last reading in the panel and leave menu bar quota indicators.
+- Main ChatGPT limits are parsed from explicit response paths. Additional model limits stay separate and can be chosen as graphic slots.
+- The panel labels official, historical, local, unavailable and paused readings. It shows the captured time and, after a failure, the latest attempt and error. In text style, `~` marks a historical or local value, and `?` means no reading. Dashed graphic tracks mean unavailable or non-percentage data; they do not mean exhausted quota. Separate rings mark uncapped amounts with `$`.
+- Cursor's monthly quota uses structured included-budget fields before dashboard prose. Auto and API windows remain separate. Capped on-demand usage is a percent; uncapped spend is a currency amount and never enters remaining-quota selection or percentage graphics.
+- The headline first finds the minimum remaining quota, then chooses the shortest window within five percentage points of that minimum, breaking ties by remaining quota and stable ID. ChatGPT additional model limits do not replace its main headline.
+- Text templates, bars, rings, battery display and six display languages are available. Changes to appearance, notification thresholds and refresh intervals do not issue usage requests.
+- Each service publishes when its own request finishes. Cursor remembers a successful endpoint, skips redundant fallback when on-demand is explicitly disabled, and has a 25-second total request budget. HTTP 429 honors Retry-After or uses exponential backoff.
+- Low Power Mode slows checks. Exhausted main ChatGPT and Claude short windows can pause polling until reset. Notifications use successful live readings only, once per cycle while quota remains.
+- First launch explains local credential access. Settings offers login help, an on-demand update check and diagnostic export. Diagnostics contain only service IDs, state, source, timestamps and counts; no credentials, account identifiers, emails, conversation contents or usage values.
 
 ### Install
 
-1. Download `MacTokenGauge-1.3.2.dmg` from Releases.
-2. Open the disk image.
-3. Drag **MacTokenGauge** into the Applications folder.
-4. Eject the disk image.
-5. Open MacTokenGauge from Applications. Its icon stays in the menu bar. It does not add a Dock icon.
+1. Download a DMG from [Releases](https://github.com/chen-bliss/MacTokenGauge/releases).
+2. Verify its checksum against that release's `SHA256SUMS.txt` with `shasum -a 256 -c SHA256SUMS.txt` in the directory containing both the DMG and ZIP. To check only the DMG, use `shasum -a 256 MacTokenGauge-<version>.dmg` and compare its line.
+3. Open the DMG and drag MacTokenGauge into Applications. Eject the image and open the app.
+4. Choose your services in the first-use screen, then select Get started.
 
-### If macOS blocks the download
+### Free distribution and Gatekeeper
 
-This copy is signed only so it can run on a Mac. Apple has not notarized it. After a browser download, macOS marks the file as quarantined. You may see one of these messages:
+This student project uses **ad hoc signing** and hardened runtime. Building, testing and packaging require no Apple account, Developer ID certificate or paid membership. Packages are **not notarized**. Ad hoc signatures verify bundle integrity locally; they do not establish a developer identity trusted by Gatekeeper. SHA-256 checksums help check downloaded bytes against the release; they do not replace notarization.
 
-- “Apple could not verify MacTokenGauge is free of malware.”
-- “MacTokenGauge is damaged and can’t be opened. You should move it to the Trash.”
+If macOS blocks a trusted, checksum-verified copy, first try opening it, then use **System Settings → Privacy & Security → Open Anyway**, as described in [Apple's instructions](https://support.apple.com/en-us/102445). If macOS says the app is damaged, do not assume the warning is harmless: re-download and verify the checksum first.
 
-The app is not damaged. Do not move it to the Trash. macOS shows that wording when a downloaded app has no Apple notarization.
-
-Use any one of the following.
-
-**Open it from the Finder**
-
-1. In Applications, Control-click MacTokenGauge, or right-click it.
-2. Choose **Open**.
-3. Choose **Open** again in the dialog.
-
-**Allow it in Settings**
-
-1. Try to open the app once, so macOS records the block.
-2. Open System Settings, then Privacy & Security.
-3. Under Security, choose **Open Anyway** next to the MacTokenGauge message.
-4. Confirm **Open**.
-
-**Remove the quarantine flag in Terminal**
-
-This does not change the app. It only clears the download marker.
+For a copy you have verified and chosen to trust, an app-specific fallback is:
 
 ```bash
 xattr -dr com.apple.quarantine /Applications/MacTokenGauge.app
 ```
 
-Then open MacTokenGauge as usual.
+This removes that app's download quarantine marker. It does not notarize the app. Do not disable Gatekeeper globally. Developer ID and notarization remain optional future distribution choices; the project's build workflows do not require them. See [Apple's distribution documentation](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution).
 
-If the disk image itself will not open, clear its marker and open it again:
+<a id="service-setup"></a>
+### Service setup and login recovery
+
+| Service | Local login source | What is measured | Recovery |
+| --- | --- | --- | --- |
+| ChatGPT | `CODEX_HOME/auth.json`, normally `~/.codex/auth.json` | Subscription Codex quota returned by the ChatGPT usage endpoint; primary and secondary windows, plus additional model limits when present | Sign in again in the Codex app or CLI, then refresh. An API key alone does not provide subscription quota. |
+| Cursor | `~/Library/Application Support/Cursor/User/globalStorage/state.vscdb` | Included monthly budget, Auto, API and optional on-demand spend, depending on the endpoint | Open Cursor and sign in again, then refresh. |
+| Claude | `~/.claude/.credentials.json`, `~/.config/claude/credentials.json`, or Claude Code credentials in Keychain | Subscription OAuth usage windows, commonly five hours and seven days | Run Claude Code's login flow again, then refresh. Keychain may ask for permission. An API key alone does not provide these windows. |
+
+The app reads existing credentials and sends each token only to its corresponding provider. It does not rotate refresh tokens, write credential files or send conversations. It reads local Codex JSONL logs only as a fallback: events must explicitly match the current account, be no more than 24 hours old, and have a valid event timestamp. Many logs have no account metadata and are intentionally ignored. A local reading is an estimate from a previous event and does not trigger quota alerts.
+
+On account changes, previous readings and notification-cycle state are discarded. For Claude opaque tokens without a stable subject, token renewal also conservatively discards the old snapshot. Rate-limit errors wait until the indicated retry time; repeated manual refresh does not bypass that delay.
+
+### Build, test and package
+
+Use **Xcode 16 or later** with macOS 14 or later. There are no third-party package dependencies. Open `ChatGPTGauge.xcodeproj`, select My Mac and run with the configured Sign to Run Locally identity. You do not need to select a development team.
 
 ```bash
-xattr -dr com.apple.quarantine ~/Downloads/MacTokenGauge-1.3.2.dmg
+swift test
+scripts/package.sh dist
 ```
 
-### Privacy
+Tests use synthetic inputs, temporary logs and injected provider loaders. They do not read real credentials or query provider accounts. The script builds a universal Release app, verifies its signature and architectures, creates and verifies a DMG, creates a ZIP, and writes `SHA256SUMS.txt` and `BUILD-INFO.txt`. Repeated builds use the same procedure; byte-for-byte reproducibility across Xcode versions is not promised.
 
-The app reads logins that are already on this Mac, and only to ask ChatGPT, Cursor, and Claude for usage. It does not write those logins back, does not rotate refresh tokens, and does not send conversation text.
+GitHub Actions runs tests and packaging on pull requests and main. The manual Prepare release workflow produces reviewable artifacts; download them and attach them to a Release after review. No signing secrets are needed. Settings checks the latest stable GitHub release when you request it and offers its download link. Updates are manually installed. No account credentials are sent to GitHub.
 
-### Build from source
+### Known limits
 
-Open `ChatGPTGauge.xcodeproj` in Xcode, choose My Mac, and run. The product name is MacTokenGauge. The project needs Xcode and macOS 14.
+Provider endpoints and local credential formats can change. Unknown ChatGPT response structures are rejected explicitly. These are subscription quota indicators, not API token billing. Exhaustion scheduling still uses the known main short windows; model-specific blocking rules require real response validation. The log index is refreshed at most once a minute, scans directories for the 20 newest files, and reads up to 2 MiB per file; files older than that bounded search may be missed. Newly indexed files can take a minute to appear.
+
+Automated tests verify data and scheduling behavior. Multiple displays, Arabic layout, VoiceOver, Keychain prompts and login items still need testing on actual installations. Distribution without notarization can require a manual Gatekeeper exception.
 
 ## 中文
 
-### 它显示什么
+### 功能与数据状态
 
-- ChatGPT 使用 ChatGPT 应用已经保存的登录，按设置里的间隔向官网读取余量。只有官网还没有返回过数字时，才暂时使用本机记录。官网一旦读到过，本机记录不会再盖掉它。
-- 打开“读取官网用量”后，才会读取 Cursor 和 Claude。
-- 菜单栏可以显示自己编写的文字、电池图标或电量百分比、彩色横条、单环、多环，或合成一个环。
-- 界面可以跟随系统语言，也可以在阿拉伯语、中文、英语、法语、俄语、西班牙语里选择。
-- 按住 Command 再拖动菜单栏图标，可以把它放到其他应用图标之间，最远到控制中心的左边。时钟和控制中心不能被挤开。
-- 点击面板以外的地方，或按 Esc，面板会关闭。
-- 应用只留在菜单栏，不会在程序坞里常驻。设置从弹出的面板里打开。Command-Q 只关闭设置窗口，菜单栏图标继续运行。要退出应用，用面板里的“退出”。
-- ChatGPT 的 5 小时窗口用尽后，会等到这次重置再向官网查询。Claude 的 5 小时窗口同样处理。Cursor 在 Auto 或按量还会变化时仍按原间隔更新，这些也都用尽后才改到月度重置时再查。
-- Cursor 的“本月”是包含额度。Auto 是另一条百分比，所以本月可以显示 0%，同时 Auto 仍有剩余。按量用量会显示在面板里：有上限时是百分比，没有上限时是金额。
-- 电量检查间隔在设置里选择，范围是 1 到 30 分钟。系统开启节能，或出现低电量警告时，用量检查、菜单栏时钟和电量读取都会自动放慢，结束后恢复你设置的间隔。
-- 每次启动应用都会刷新一次用量。刷新间隔下面的“亮屏时刷新”打开后，屏幕点亮时也会再查一次，包括打开笔记本盖子。关掉这个开关不会跳过启动时的那一次刷新。
-- 某个窗口的剩余额度降到你设置的比例、而且还有剩余时，会在这个重置周期里通知一次。如果某次检查时已经全部用完，就不再提醒。
+- 分别启用 ChatGPT、Cursor 和 Claude，手动刷新也遵循开关。暂停后，弹窗保留最后读数，菜单栏隐藏该服务的额度指示。
+- ChatGPT 主额度按明确路径解析，附加模型额度单独保留，可在图形槽位中选择。
+- 弹窗区分“官网数据”“历史读数”“本机记录”“暂无可用数据”和“已暂停更新”，展示采集时间，并在失败后展示最后尝试时间和错误。文字中的 `~` 表示历史或本地读数，`?` 表示没有读数。虚线图形表示暂无可用比例，不等同于额度耗尽。无上限金额在独立环中显示 `$`。
+- Cursor 月额度优先采用结构化预算字段，Auto 和 API 分别显示。设置上限的按量消费显示比例，无上限消费显示金额，金额不参与剩余额度选择和百分比绘图。
+- 主窗口先确定最低剩余额度，再从“最低值加 5 个百分点”范围内选择较短窗口，最后按余量和稳定 ID 排序。ChatGPT 附加模型额度不会替代主额度标题。
+- 支持文字模板、横条、圆环、电量和六种界面语言。外观、通知阈值和刷新间隔的调整不会发起网络查询。
+- 各服务完成后独立更新。Cursor 记住可用接口，识别按量消费明确停用的响应，一次查询最多等待 25 秒。收到 429 时遵循 Retry-After，并提供指数退避。
+- 低电量模式会降低查询频率。已耗尽的 ChatGPT 和 Claude 主短时窗口可等到重置后再查询。通知只使用成功的实时官网读数，每个周期提醒一次，耗尽后不再提醒。
+- 首次启动说明凭据读取位置，设置提供登录帮助、Releases 链接和诊断导出。诊断仅含服务名称、状态、来源、时间和窗口数量，不含凭据、账户标识、邮箱、对话或用量数值。
 
-### 安装
+### 安装与免费发布
 
-1. 在 Releases 页面下载 `MacTokenGauge-1.3.2.dmg`。
-2. 打开这个磁盘映像。
-3. 把 **MacTokenGauge** 拖进“应用程序”文件夹。
-4. 推出磁盘映像。
-5. 从“应用程序”里打开 MacTokenGauge。图标会出现在菜单栏，程序坞里不会再常驻一个图标。
+在 [Releases](https://github.com/chen-bliss/MacTokenGauge/releases) 下载 DMG，核对该版本的 SHA-256 校验值，打开后将 MacTokenGauge 拖入“应用程序”。推出磁盘映像并启动，在首次使用页面选择服务，再点击“开始使用”。
 
-### 如果系统拦截了下载的文件
+项目采用 **ad hoc 签名**并开启 Hardened Runtime，构建、测试和打包不需要苹果开发者账号，也不需要购买会员。安装包**未经过 Apple 公证**，因此 macOS 可能拦截首次打开。ad hoc 签名只能用于本地完整性验证，不能证明 Gatekeeper 信任的开发者身份；校验值也不能代替公证。
 
-这一份安装包只做了本机运行所需的签名，没有经过 Apple 公证。浏览器下载之后，macOS 会给文件加上隔离标记。你可能会看到下面两类提示：
+确认来源可信、校验值匹配后，可以先尝试打开，再进入“系统设置”中的“隐私与安全性”，选择“仍要打开”。操作依据见 [Apple 官方说明](https://support.apple.com/zh-cn/102445)。出现“已损坏”提示时，应先重新下载并核对校验值，不能一概认定提示无害。
 
-- “Apple 无法验证 MacTokenGauge 是否包含恶意软件。”
-- “MacTokenGauge 已损坏，无法打开。你应该将它移到废纸篓。”
-
-应用本身没有损坏。请不要把它移到废纸篓。没有 Apple 公证的下载文件，系统经常会用“已损坏”这句提示来拦截。
-
-下面三种做法，用其中一种即可。
-
-**在访达里打开**
-
-1. 在“应用程序”里按住 Control 点 MacTokenGauge，或按右键。
-2. 选择“打开”。
-3. 在对话框里再点一次“打开”。
-
-**在系统设置里允许**
-
-1. 先尝试打开一次应用，让系统记下这次拦截。
-2. 打开“系统设置”，进入“隐私与安全性”。
-3. 在“安全性”一节里，找到 MacTokenGauge 的提示，点“仍要打开”。
-4. 再确认“打开”。
-
-**在终端里去掉隔离标记**
-
-这一步不会改应用内容，只是清掉下载时附上的隔离标记。
+对于已核验并决定信任的副本，可使用仅针对该应用的备用操作：
 
 ```bash
 xattr -dr com.apple.quarantine /Applications/MacTokenGauge.app
 ```
 
-然后再照常打开 MacTokenGauge。
+此命令只移除该应用的下载隔离标记，不会使其获得公证。无需关闭整个系统的 Gatekeeper。付费 Developer ID 签名和公证仅作为未来可选方案，当前工作流不依赖这些条件。
 
-如果磁盘映像本身打不开，先清掉它的隔离标记，再打开：
+### 接入前提与隐私
+
+ChatGPT 读取 `CODEX_HOME` 下的 `auth.json`，默认位于 `~/.codex`，展示接口返回的订阅 Codex 额度。Cursor 读取其 `globalStorage` 下的 `state.vscdb`。Claude 读取 Claude Code 的本地凭据文件或钥匙串中的登录，需要订阅 OAuth 登录。单独的 API Key 不能提供订阅额度窗口。登录缺失或过期时，请在对应客户端重新登录，再刷新。
+
+应用仅将令牌发给对应服务，不轮换刷新令牌，不修改凭据文件，不发送对话内容。本地 Codex 日志仅作为回退：事件必须明确匹配当前账户，时间有效，且不超过 24 小时。不含账户元数据的日志会被忽略。本机记录代表过去某一时刻的额度，不触发实时额度通知。
+
+切换账户后清理旧读数和通知周期状态。Claude 使用不含稳定账户标识的不透明令牌时，令牌更新也会保守地清理旧读数。限流期间手动刷新不会绕过退避。
+
+### 源码构建与限制
+
+需要 **Xcode 16 或更高版本**、macOS 14 或更高版本。项目不依赖第三方包。打开 `ChatGPTGauge.xcodeproj`，选择“我的 Mac”，按现有本地签名配置运行，不需要选择开发团队。
 
 ```bash
-xattr -dr com.apple.quarantine ~/Downloads/MacTokenGauge-1.3.2.dmg
+swift test
+scripts/package.sh dist
 ```
 
-### 隐私
+自动测试使用模拟响应、临时日志和注入的加载器，不读取真实凭据，也不查询真实账户。打包脚本生成 Apple 芯片与 Intel 通用构建，检查签名、架构和磁盘映像，并输出 ZIP、SHA-256 校验值及构建信息。GitHub Actions 在 PR 和 main 上运行验证，手动发布工作流提供待审核构建产物。
 
-应用只读取这台 Mac 上已经存在的登录，用来向 ChatGPT、Cursor、Claude 查询用量。它不把登录写回去，不轮换刷新令牌，也不发送对话内容。
+接口和本地登录格式可能变化。未知 ChatGPT 响应结构会明确报错。耗尽暂停仍基于已知主短时窗口，更多模型的限制规则需用真实响应验证。日志索引每分钟最多更新一次，读取最近 20 个文件，每个最多 2 MiB，因此可能遗漏搜索范围以外的日志。设置可在用户点击时查询 GitHub 最新稳定版本并提供下载链接，不向 GitHub 发送账户凭据。更新仍由用户手动安装。
 
-### 从源码构建
-
-用 Xcode 打开 `ChatGPTGauge.xcodeproj`，选择“我的 Mac”，然后运行。生成的应用名称是 MacTokenGauge。需要已安装 Xcode，系统为 macOS 14 或更高版本。
+多显示器、阿拉伯语布局、VoiceOver、钥匙串授权和开机启动仍需在实际安装环境验收。完整变更和贡献方法见 [CHANGELOG](CHANGELOG.md) 与 [CONTRIBUTING](CONTRIBUTING.md)。
