@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.4.1 (2026-11-01)
+
+- Read Cursor's session token from the Keychain item `cursor-access-token` when `state.vscdb` stores an encrypted `cursor-safe-storage` value. Plaintext database tokens still work without a Keychain read.
+
 ## 1.4.0 (2026-10-04)
 
 - Parse ChatGPT main limits by explicit endpoint paths and keep additional limits separate with stable IDs.

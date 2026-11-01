@@ -59,7 +59,7 @@ This removes that app's download quarantine marker. It does not notarize the app
 | Service | Local login source | What is measured | Recovery |
 | --- | --- | --- | --- |
 | ChatGPT | `CODEX_HOME/auth.json`, normally `~/.codex/auth.json` | Subscription Codex quota returned by the ChatGPT usage endpoint; primary and secondary windows, plus additional model limits when present | Sign in again in the Codex app or CLI, then refresh. An API key alone does not provide subscription quota. |
-| Cursor | `~/Library/Application Support/Cursor/User/globalStorage/state.vscdb` | Included monthly budget, Auto, API and optional on-demand spend, depending on the endpoint | Open Cursor and sign in again, then refresh. |
+| Cursor | `~/Library/Application Support/Cursor/User/globalStorage/state.vscdb`. When that login is stored as `cursor-safe-storage` ciphertext, the session token is read from the Keychain item `cursor-access-token` (`cursor-user`). | Included monthly budget, Auto, API and optional on-demand spend, depending on the endpoint | Allow the Keychain prompt if macOS shows one, then refresh. Sign in again in Cursor only when the session itself has expired. |
 | Claude | `~/.claude/.credentials.json`, `~/.config/claude/credentials.json`, or Claude Code credentials in Keychain | Subscription OAuth usage windows, commonly five hours and seven days | Run Claude Code's login flow again, then refresh. Keychain may ask for permission. An API key alone does not provide these windows. |
 
 The app reads existing credentials and sends each token only to its corresponding provider. It does not rotate refresh tokens, write credential files or send conversations. It reads local Codex JSONL logs only as a fallback: events must explicitly match the current account, be no more than 24 hours old, and have a valid event timestamp. Many logs have no account metadata and are intentionally ignored. A local reading is an estimate from a previous event and does not trigger quota alerts.
@@ -117,7 +117,7 @@ xattr -dr com.apple.quarantine /Applications/MacTokenGauge.app
 
 ### 接入前提与隐私
 
-ChatGPT 读取 `CODEX_HOME` 下的 `auth.json`，默认位于 `~/.codex`，展示接口返回的订阅 Codex 额度。Cursor 读取其 `globalStorage` 下的 `state.vscdb`。Claude 读取 Claude Code 的本地凭据文件或钥匙串中的登录，需要订阅 OAuth 登录。单独的 API Key 不能提供订阅额度窗口。登录缺失或过期时，请在对应客户端重新登录，再刷新。
+ChatGPT 读取 `CODEX_HOME` 下的 `auth.json`，默认位于 `~/.codex`，展示接口返回的订阅 Codex 额度。Cursor 读取其 `globalStorage` 下的 `state.vscdb`。若其中的登录已变成 `cursor-safe-storage` 密文，则改读钥匙串条目 `cursor-access-token`（账户 `cursor-user`）。系统弹出钥匙串授权时允许访问后再刷新。只有会话本身过期时，才需要在 Cursor 里重新登录。Claude 读取 Claude Code 的本地凭据文件或钥匙串中的登录，需要订阅 OAuth 登录。单独的 API Key 不能提供订阅额度窗口。登录缺失或过期时，请在对应客户端重新登录，再刷新。
 
 应用仅将令牌发给对应服务，不轮换刷新令牌，不修改凭据文件，不发送对话内容。本地 Codex 日志仅作为回退：事件必须明确匹配当前账户，时间有效，且不超过 24 小时。不含账户元数据的日志会被忽略。本机记录代表过去某一时刻的额度，不触发实时额度通知。
 

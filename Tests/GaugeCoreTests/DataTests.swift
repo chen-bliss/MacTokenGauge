@@ -157,4 +157,38 @@ final class DataTests: XCTestCase {
         }
         XCTAssertTrue(text.contains("quotaWindowCount"))
     }
+
+    func testCursorEncryptedStorageUsesKeychainToken() throws {
+        let token = try XCTUnwrap(CursorAuthReader.resolveAccessToken(
+            stored: "cursor-safe-storage:v1:ciphertext",
+            keychainToken: "header.payload.signature"
+        ).get())
+        XCTAssertEqual(token, "header.payload.signature")
+    }
+
+    func testCursorPlaintextTokenIgnoresKeychain() throws {
+        let token = try XCTUnwrap(CursorAuthReader.resolveAccessToken(
+            stored: "plain-session-token",
+            keychainToken: "header.payload.signature"
+        ).get())
+        XCTAssertEqual(token, "plain-session-token")
+    }
+
+    func testCursorEncryptedStorageWithoutKeychainIsNotAMissingLogin() {
+        XCTAssertEqual(
+            CursorAuthReader.resolveAccessToken(stored: "cursor-safe-storage:v1:ciphertext", keychainToken: nil),
+            .failure(.encryptedUnreadable)
+        )
+        XCTAssertEqual(
+            CursorAuthReader.resolveAccessToken(stored: "cursor-safe-storage:v1:ciphertext", keychainToken: "  cursor-safe-storage:v1:other"),
+            .failure(.encryptedUnreadable)
+        )
+        XCTAssertEqual(CursorAuthReader.resolveAccessToken(stored: nil, keychainToken: nil), .failure(.missing))
+        XCTAssertEqual(CursorAuthReader.resolveAccessToken(stored: "   ", keychainToken: nil), .failure(.missing))
+    }
+
+    func testCursorKeychainTokenIsUsedWhenDatabaseHasNoLogin() throws {
+        let token = try XCTUnwrap(CursorAuthReader.resolveAccessToken(stored: nil, keychainToken: " header.payload.signature ").get())
+        XCTAssertEqual(token, "header.payload.signature")
+    }
 }

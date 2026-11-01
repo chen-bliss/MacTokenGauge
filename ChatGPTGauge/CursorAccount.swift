@@ -1,15 +1,18 @@
 import Foundation
-import CoreFoundation
+import Security
 
 enum CursorAccountLoader {
     static func load() async -> ProviderAccount {
-        guard let session = CursorAuthReader.load() else {
+        switch CursorAuthReader.load() {
+        case .missing:
             return account(status: L10n.s(.cursorNoLogin))
+        case .encryptedUnreadable:
+            return account(status: L10n.s(.cursorKeychain))
+        case .session(let session):
+            var result = await loadAuthenticated(session: session)
+            result.accountIdentity = AccountIdentity.fingerprint(session.userID ?? session.email ?? session.accessToken)
+            return result
         }
-
-        var result = await loadAuthenticated(session: session)
-        result.accountIdentity = AccountIdentity.fingerprint(session.userID ?? session.email ?? session.accessToken)
-        return result
     }
 
     private static func loadAuthenticated(session: CursorAuthReader.Session) async -> ProviderAccount {
@@ -84,7 +87,83 @@ enum CursorAuthReader {
         var membership: String?
     }
 
-    static func load() -> Session? {
+    enum LoadResult {
+        case session(Session)
+        case missing
+        case encryptedUnreadable
+    }
+
+    enum TokenFailure: Error, Equatable {
+        case missing
+        case encryptedUnreadable
+    }
+
+    static let encryptedPrefix = "cursor-safe-storage:"
+
+    static func load() -> LoadResult {
+        let values = databaseValues()
+        let stored = values?["cursorAuth/accessToken"]
+        let keychain = needsKeychain(stored) ? keychainToken() : nil
+        switch resolveAccessToken(stored: stored, keychainToken: keychain) {
+        case .failure(.missing):
+            return .missing
+        case .failure(.encryptedUnreadable):
+            return .encryptedUnreadable
+        case .success(let accessToken):
+            let authID = values?["cursorAuth/stripeMembershipAuthId"]
+            return .session(Session(
+                accessToken: accessToken,
+                userID: userID(from: authID) ?? userID(inToken: accessToken),
+                email: values?["cursorAuth/cachedEmail"],
+                membership: values?["cursorAuth/stripeMembershipType"]
+            ))
+        }
+    }
+
+    /// Plaintext database tokens stay local. Cursor now writes `cursor-safe-storage:` ciphertext into
+    /// `state.vscdb` and keeps the session JWT in the login keychain.
+    static func resolveAccessToken(stored: String?, keychainToken: String?) -> Result<String, TokenFailure> {
+        if let storedValue = usable(stored) {
+            if storedValue.hasPrefix(encryptedPrefix) {
+                guard let keychain = usable(keychainToken), !keychain.hasPrefix(encryptedPrefix) else {
+                    return .failure(.encryptedUnreadable)
+                }
+                return .success(keychain)
+            }
+            return .success(storedValue)
+        }
+        if let keychain = usable(keychainToken), !keychain.hasPrefix(encryptedPrefix) {
+            return .success(keychain)
+        }
+        return .failure(.missing)
+    }
+
+    private static func needsKeychain(_ stored: String?) -> Bool {
+        guard let storedValue = usable(stored) else { return true }
+        return storedValue.hasPrefix(encryptedPrefix)
+    }
+
+    private static func usable(_ token: String?) -> String? {
+        guard let token else { return nil }
+        let trimmed = token.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private static func keychainToken() -> String? {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: "cursor-access-token",
+            kSecAttrAccount as String: "cursor-user",
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne
+        ]
+        var item: CFTypeRef?
+        let status = SecItemCopyMatching(query as CFDictionary, &item)
+        guard status == errSecSuccess, let data = item as? Data else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
+    private static func databaseValues() -> [String: String]? {
         let database = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Application Support/Cursor/User/globalStorage/state.vscdb")
         guard FileManager.default.fileExists(atPath: database.path) else { return nil }
@@ -105,14 +184,7 @@ enum CursorAuthReader {
             guard parts.count == 2 else { continue }
             values[String(parts[0])] = String(parts[1])
         }
-        guard let accessToken = values["cursorAuth/accessToken"], !accessToken.isEmpty else { return nil }
-        let authID = values["cursorAuth/stripeMembershipAuthId"]
-        return Session(
-            accessToken: accessToken,
-            userID: userID(from: authID) ?? userID(inToken: accessToken),
-            email: values["cursorAuth/cachedEmail"],
-            membership: values["cursorAuth/stripeMembershipType"]
-        )
+        return values
     }
 
     private static func userID(from raw: String?) -> String? {
