@@ -259,7 +259,9 @@ enum CursorUsageClient {
                         last = UsageClientError.unrecognized
                         continue
                     }
-                    merged = mergeWindows(merged, parsed.windows)
+                    let replacesTotal = parsed.windows.contains { $0.id == "cursor-auto" }
+                        && parsed.windows.contains { $0.id == "cursor-api" }
+                    merged = mergeWindows(merged, parsed.windows, replaceTotal: replacesTotal)
                     if note == nil { note = parsed.note }
                     disabled = disabled || parsed.onDemandDisabled
                     let hasPlan = merged.contains { $0.id == "cursor-total" || $0.id == "cursor-auto" }
@@ -285,9 +287,14 @@ enum CursorUsageClient {
         return Parsed(windows: ordered(merged), note: note, onDemandDisabled: disabled)
     }
 
-    private static func mergeWindows(_ current: [UsageWindow], _ incoming: [UsageWindow]) -> [UsageWindow] {
+    private static func mergeWindows(_ current: [UsageWindow], _ incoming: [UsageWindow], replaceTotal: Bool) -> [UsageWindow] {
         var merged = current
-        for window in incoming where !merged.contains(where: { $0.id == window.id }) {
+        for window in incoming {
+            if replaceTotal, window.id == "cursor-total", let index = merged.firstIndex(where: { $0.id == window.id }) {
+                merged[index] = window
+                continue
+            }
+            guard !merged.contains(where: { $0.id == window.id }) else { continue }
             merged.append(window)
         }
         return merged
@@ -377,8 +384,10 @@ enum CursorUsageClient {
         let windowSeconds = start.flatMap { opened in resetAt.map { $0.timeIntervalSince(opened) } }
         var windows: [UsageWindow] = []
 
+        let onDemand = onDemandDictionary(in: json)
+        let spend = spendLimitDictionary(in: json)
         if let plan {
-            if let total = separateTotalPercent(plan) {
+            if let total = combinedSplitUsedPercent(plan, onDemand: onDemand, spend: spend) {
                 windows.append(window(id: "cursor-total", title: "本月", used: total, resetAt: resetAt, windowSeconds: windowSeconds))
             } else if let used = includedUsedPercent(plan) {
                 windows.append(window(id: "cursor-total", title: "本月", used: used, resetAt: resetAt, windowSeconds: windowSeconds))
@@ -423,7 +432,8 @@ enum CursorUsageClient {
         }
 
         guard !windows.isEmpty else { return nil }
-        var notes = [plan.flatMap(dollarNote)].compactMap { $0 }
+        let usedCombinedTotal = plan.flatMap { combinedSplitUsedPercent($0, onDemand: onDemand, spend: spend) } != nil
+        var notes = usedCombinedTotal ? [] : [plan.flatMap(dollarNote)].compactMap { $0 }
         if let plan, let numeric = includedUsedPercent(plan),
            let message = json["displayMessage"] as? String, let textual = percent(in: message),
            abs(numeric - textual) > 1 {
@@ -454,14 +464,30 @@ enum CursorUsageClient {
         return nil
     }
 
-    /// Cursor shows one included-usage percent when Auto and API are separate meters.
-    /// Included spend is capped at the dollar limit, so using it there pins the total at 0% remaining
-    /// while `totalPercentUsed` is the percent Cursor itself displays.
-    /// Without those separate meters, included spend still wins. A lone `totalPercentUsed` can stay low after the budget is gone.
-    private static func separateTotalPercent(_ plan: [String: Any]) -> Double? {
-        let hasSplit = JSONValues.number(plan["autoPercentUsed"]) != nil || JSONValues.number(plan["apiPercentUsed"]) != nil
-        guard hasSplit else { return nil }
-        return JSONValues.number(plan["totalPercentUsed"])
+    /// Auto and API are separate allowances. The monthly total is their combined fill,
+    /// plus capped extra spend only when the user has set that allowance.
+    /// Each pool counts as one full share, so the result is their average rather than a raw sum of percents.
+    /// `totalPercentUsed` is only the Auto included-usage meter and is not this total.
+    private static func combinedSplitUsedPercent(_ plan: [String: Any], onDemand: [String: Any]?, spend: [String: Any]?) -> Double? {
+        var parts: [Double] = []
+        if let auto = JSONValues.number(plan["autoPercentUsed"]) { parts.append(min(100, max(0, auto))) }
+        if let api = JSONValues.number(plan["apiPercentUsed"]) { parts.append(min(100, max(0, api))) }
+        guard parts.count == 2 else { return nil }
+        if let extra = extraUsedPercent(onDemand: onDemand, spend: spend) { parts.append(extra) }
+        return parts.reduce(0, +) / Double(parts.count)
+    }
+
+    private static func extraUsedPercent(onDemand: [String: Any]?, spend: [String: Any]?) -> Double? {
+        if let spend {
+            let used = JSONValues.number(spend["individualUsed"] ?? spend["pooledUsed"] ?? spend["used"])
+            let limit = JSONValues.number(spend["individualLimit"] ?? spend["pooledLimit"] ?? spend["limit"])
+            if let used, let limit, limit > 0 { return min(100, max(0, used / limit * 100)) }
+        }
+        guard let onDemand else { return nil }
+        if let enabled = onDemand["enabled"] as? Bool, !enabled { return nil }
+        guard let used = JSONValues.number(onDemand["used"]),
+              let limit = JSONValues.number(onDemand["limit"]), limit > 0 else { return nil }
+        return min(100, max(0, used / limit * 100))
     }
 
     /// Structured included-budget fields win over dashboard prose.

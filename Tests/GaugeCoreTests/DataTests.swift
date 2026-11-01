@@ -71,13 +71,20 @@ final class DataTests: XCTestCase {
         XCTAssertTrue(parsed.onDemandDisabled)
     }
 
-    func testCursorSeparateMetersUseTotalPercentInsteadOfClampedIncludedSpend() throws {
-        let response = data(#"{"displayMessage":"You've hit your usage limit","planUsage":{"includedSpend":2000,"limit":2000,"totalPercentUsed":15.66,"autoPercentUsed":14.21,"apiPercentUsed":73.51}}"#)
+    func testCursorMonthlyTotalCombinesAutoApiAndCappedExtra() throws {
+        let response = data(#"{"displayMessage":"You've hit your usage limit","planUsage":{"includedSpend":2000,"limit":2000,"totalPercentUsed":15.66,"autoPercentUsed":14.21,"apiPercentUsed":73.51},"individualUsage":{"onDemand":{"enabled":true,"used":250,"limit":1000}}}"#)
         let parsed = try XCTUnwrap(CursorUsageClient.parse(response))
         let total = try XCTUnwrap(parsed.windows.first { $0.id == "cursor-total" })
-        XCTAssertEqual(total.usedPercent, 15.66, accuracy: 0.01)
+        XCTAssertEqual(total.usedPercent, (14.21 + 73.51 + 25) / 3, accuracy: 0.01)
         XCTAssertEqual(parsed.windows.first { $0.id == "cursor-auto" }?.usedPercent ?? -1, 14.21, accuracy: 0.01)
         XCTAssertEqual(parsed.windows.first { $0.id == "cursor-api" }?.usedPercent ?? -1, 73.51, accuracy: 0.01)
+    }
+
+    func testCursorMonthlyTotalOmitsUnsetExtraUsage() throws {
+        let response = data(#"{"planUsage":{"autoPercentUsed":10,"apiPercentUsed":40},"individualUsage":{"onDemand":{"enabled":false,"used":0,"limit":null}}}"#)
+        let parsed = try XCTUnwrap(CursorUsageClient.parse(response))
+        XCTAssertEqual(parsed.windows.first { $0.id == "cursor-total" }?.usedPercent ?? -1, 25, accuracy: 0.01)
+        XCTAssertFalse(parsed.windows.contains { $0.id == "cursor-ondemand" })
     }
 
     func testCursorIncludedBudgetStillWinsWithoutSeparateMeters() throws {

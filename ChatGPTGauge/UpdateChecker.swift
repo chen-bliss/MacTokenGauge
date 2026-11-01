@@ -47,7 +47,7 @@ extension UsageMonitor {
         guard !checkingUpdates else { return }
         checkingUpdates = true
         Task {
-            let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.4.2"
+            let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.4.3"
             updateResult = await UpdateChecker.check(currentVersion: version)
             checkingUpdates = false
         }

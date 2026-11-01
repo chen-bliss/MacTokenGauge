@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.4.3 (2026-11-01)
+
+- Calculate Cursor's monthly total from the Auto and API allowances together. Include capped extra spend only when that allowance is set.
+
 ## 1.4.2 (2026-11-01)
 
 - Use Cursor's included-usage percent for the monthly total when Auto and API are separate meters, so a capped included dollar amount no longer pins that total at 0% remaining.
