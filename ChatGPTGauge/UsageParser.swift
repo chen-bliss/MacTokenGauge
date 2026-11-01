@@ -16,7 +16,8 @@ enum UsageParser {
         let extra = json["additional_rate_limits"] ?? limits["additional_rate_limits"]
         windows += extraWindows(extra, capturedAt: capturedAt)
         return UsageSnapshot(planType: string(json["plan_type"]), windows: windows,
-                             creditsBalance: credits(in: json), source: .live, capturedAt: capturedAt)
+                             creditsBalance: credits(in: json), resetCardCount: resetCards(in: json),
+                             source: .live, capturedAt: capturedAt)
     }
 
     private static func parseLocalEvent(_ json: [String: Any], capturedAt: Date) -> UsageSnapshot? {
@@ -102,6 +103,13 @@ enum UsageParser {
             if minutes >= 60, minutes % 60 == 0 { return "\(minutes / 60) 小时" }
             return fallback
         }
+    }
+
+    /// Cards the account already holds. `applicable_available_count` only says whether one can be applied to the current window.
+    private static func resetCards(in json: [String: Any]) -> Int? {
+        guard let credits = json["rate_limit_reset_credits"] as? [String: Any],
+              let count = number(credits["available_count"]) else { return nil }
+        return max(0, Int(count.rounded()))
     }
 
     private static func credits(in dict: [String: Any]) -> String? {

@@ -169,10 +169,17 @@ private struct AccountSection: View {
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                if let credits = account.creditsBalance {
-                    Text(L10n.f(.creditsLine, credits))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                if account.creditsBalance != nil || account.resetCardCount != nil {
+                    HStack(spacing: 8) {
+                        if let credits = account.creditsBalance {
+                            Text(L10n.f(.creditsLine, credits))
+                        }
+                        if let count = account.resetCardCount {
+                            Text(L10n.f(.resetCards, count))
+                        }
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 }
                 if let note = account.note {
                     Text(note)

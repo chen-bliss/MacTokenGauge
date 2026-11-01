@@ -62,6 +62,7 @@ struct UsageSnapshot: Equatable, Sendable {
     var planType: String?
     var windows: [UsageWindow]
     var creditsBalance: String?
+    var resetCardCount: Int? = nil
     var source: UsageSource
     var capturedAt: Date
 }
@@ -80,6 +81,7 @@ struct ProviderAccount: Identifiable, Equatable, Sendable {
     var status: String
     var capturedAt: Date?
     var creditsBalance: String?
+    var resetCardCount: Int? = nil
     var note: String?
     var origin: UsageSource = .live
     var state: AccountState = .current

@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.4.4 (2026-11-01)
+
+- Show the number of ChatGPT reset cards held by the account next to the credits balance.
+
 ## 1.4.3 (2026-11-01)
 
 - Calculate Cursor's monthly total from the Auto and API allowances together. Include capped extra spend only when that allowance is set.

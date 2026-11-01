@@ -65,7 +65,7 @@ enum LKey: String {
     case detailText, detailBattery, detailBars, detailRing, detailRings, detailCombined
     case batteryPercent, charging, onBattery, noBatteryDevice, noBatteryShort
     case batteryChargingHelp, batteryIdleHelp
-    case exhausted, creditsLine, remainingWord, noReset, usedLine
+    case exhausted, creditsLine, resetCards, remainingWord, noReset, usedLine
     case helpLeft, helpLeftReset, accountLine, noUsageYet
     case resetSoon, shortDH, shortHM, shortM, longDH, longHM, longM
     case todayAt, tomorrowAt, dateAt, justNow, secsAgo, minsAgo, hoursAgo, daysAgo
@@ -289,6 +289,7 @@ private let en: [LKey: String] = [
     .batteryIdleHelp: "Battery %d%%",
     .exhausted: "%@ is used up. It stays unavailable until the reset time.",
     .creditsLine: "Credits %@",
+    .resetCards: "Reset cards %d",
     .remainingWord: "left",
     .noReset: "No reset time yet",
     .usedLine: "Used %d%%",
@@ -477,6 +478,7 @@ private let zh: [LKey: String] = [
     .batteryIdleHelp: "本机电量 %d%%",
     .exhausted: "%@已经用完。到重置时间之前，这个窗口不能继续用。",
     .creditsLine: "积分余额 %@",
+    .resetCards: "重置卡 %d",
     .remainingWord: "剩余",
     .noReset: "还没有重置时间",
     .usedLine: "已用 %d%%",
@@ -665,6 +667,7 @@ private let fr: [LKey: String] = [
     .batteryIdleHelp: "Batterie %d%%",
     .exhausted: "%@ est épuisé. Cette fenêtre reste indisponible jusqu’à la réinitialisation.",
     .creditsLine: "Crédits %@",
+    .resetCards: "Cartes de réinitialisation %d",
     .remainingWord: "reste",
     .noReset: "Pas encore d’heure de réinitialisation",
     .usedLine: "Utilisé %d%%",
@@ -853,6 +856,7 @@ private let es: [LKey: String] = [
     .batteryIdleHelp: "Batería %d%%",
     .exhausted: "%@ se ha agotado. Esa ventana no se puede usar hasta la hora de reinicio.",
     .creditsLine: "Créditos %@",
+    .resetCards: "Tarjetas de reinicio %d",
     .remainingWord: "queda",
     .noReset: "Aún no hay hora de reinicio",
     .usedLine: "Usado %d%%",
@@ -1041,6 +1045,7 @@ private let ru: [LKey: String] = [
     .batteryIdleHelp: "Батарея %d%%",
     .exhausted: "%@ исчерпано. До времени сброса это окно недоступно.",
     .creditsLine: "Кредиты %@",
+    .resetCards: "Карты сброса %d",
     .remainingWord: "осталось",
     .noReset: "Времени сброса пока нет",
     .usedLine: "Использовано %d%%",
@@ -1229,6 +1234,7 @@ private let ar: [LKey: String] = [
     .batteryIdleHelp: "البطارية %d%%",
     .exhausted: "نفد %@. تبقى هذه النافذة غير متاحة حتى وقت إعادة التعيين.",
     .creditsLine: "الرصيد %@",
+    .resetCards: "بطاقات إعادة التعيين %d",
     .remainingWord: "متبقٍ",
     .noReset: "لا وقت لإعادة التعيين بعد",
     .usedLine: "المستخدم %d%%",

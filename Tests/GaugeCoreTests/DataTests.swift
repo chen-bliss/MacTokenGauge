@@ -23,8 +23,16 @@ final class DataTests: XCTestCase {
             XCTAssertEqual(snapshot.windows[0].remainingPercent, 80)
             XCTAssertEqual(snapshot.windows[2].remainingPercent, 10)
             XCTAssertEqual(snapshot.creditsBalance, "4.50")
+            XCTAssertNil(snapshot.resetCardCount)
             XCTAssertEqual(UsageFormatting.headline(account(snapshot.windows).headlineWindows)?.id, "secondary")
         }
+    }
+
+    func testChatGPTResetCardCountComesFromAvailableCards() throws {
+        let response = data(#"{"plan_type":"plus","rate_limit":{"primary_window":{"used_percent":1,"limit_window_seconds":18000}},"credits":{"balance":"0"},"rate_limit_reset_credits":{"available_count":1,"applicable_available_count":0}}"#)
+        let snapshot = try XCTUnwrap(UsageParser.parse(data: response, source: .live, capturedAt: moment))
+        XCTAssertEqual(snapshot.resetCardCount, 1)
+        XCTAssertEqual(snapshot.creditsBalance, "0")
     }
 
     func testUnknownStructureIsRejectedRatherThanSearchedRecursively() {
