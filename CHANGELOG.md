@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.4.2 (2026-11-01)
+
+- Use Cursor's included-usage percent for the monthly total when Auto and API are separate meters, so a capped included dollar amount no longer pins that total at 0% remaining.
+
 ## 1.4.1 (2026-11-01)
 
 - Read Cursor's session token from the Keychain item `cursor-access-token` when `state.vscdb` stores an encrypted `cursor-safe-storage` value. Plaintext database tokens still work without a Keychain read.

@@ -25,7 +25,7 @@ Regenerate with `scripts/preview.sh` on a logged-in Mac with a graphical session
 - Enable ChatGPT, Cursor and Claude independently. Manual refresh respects these switches. Paused services retain their last reading in the panel and leave menu bar quota indicators.
 - Main ChatGPT limits are parsed from explicit response paths. Additional model limits stay separate and can be chosen as graphic slots.
 - The panel labels official, historical, local, unavailable and paused readings. It shows the captured time and, after a failure, the latest attempt and error. In text style, `~` marks a historical or local value, and `?` means no reading. Dashed graphic tracks mean unavailable or non-percentage data; they do not mean exhausted quota. Separate rings mark uncapped amounts with `$`.
-- Cursor's monthly quota uses structured included-budget fields before dashboard prose. Auto and API windows remain separate. Capped on-demand usage is a percent; uncapped spend is a currency amount and never enters remaining-quota selection or percentage graphics.
+- Cursor's monthly quota uses the included-usage percent when Auto and API are separate meters. Otherwise it uses the included dollar budget before dashboard prose. Auto and API windows remain separate. Capped on-demand usage is a percent; uncapped spend is a currency amount and never enters remaining-quota selection or percentage graphics.
 - The headline first finds the minimum remaining quota, then chooses the shortest window within five percentage points of that minimum, breaking ties by remaining quota and stable ID. ChatGPT additional model limits do not replace its main headline.
 - Text templates, bars, rings, battery display and six display languages are available. Changes to appearance, notification thresholds and refresh intervals do not issue usage requests.
 - Each service publishes when its own request finishes. Cursor remembers a successful endpoint, skips redundant fallback when on-demand is explicitly disabled, and has a 25-second total request budget. HTTP 429 honors Retry-After or uses exponential backoff.
@@ -92,7 +92,7 @@ Automated tests verify data and scheduling behavior. Multiple displays, Arabic l
 - 分别启用 ChatGPT、Cursor 和 Claude，手动刷新也遵循开关。暂停后，弹窗保留最后读数，菜单栏隐藏该服务的额度指示。
 - ChatGPT 主额度按明确路径解析，附加模型额度单独保留，可在图形槽位中选择。
 - 弹窗区分“官网数据”“历史读数”“本机记录”“暂无可用数据”和“已暂停更新”，展示采集时间，并在失败后展示最后尝试时间和错误。文字中的 `~` 表示历史或本地读数，`?` 表示没有读数。虚线图形表示暂无可用比例，不等同于额度耗尽。无上限金额在独立环中显示 `$`。
-- Cursor 月额度优先采用结构化预算字段，Auto 和 API 分别显示。设置上限的按量消费显示比例，无上限消费显示金额，金额不参与剩余额度选择和百分比绘图。
+- Cursor 在 Auto 与 API 分开计量时，月额度采用包含用量百分比；否则优先采用包含金额。Auto 和 API 分别显示。设置上限的按量消费显示比例，无上限消费显示金额，金额不参与剩余额度选择和百分比绘图。
 - 主窗口先确定最低剩余额度，再从“最低值加 5 个百分点”范围内选择较短窗口，最后按余量和稳定 ID 排序。ChatGPT 附加模型额度不会替代主额度标题。
 - 支持文字模板、横条、圆环、电量和六种界面语言。外观、通知阈值和刷新间隔的调整不会发起网络查询。
 - 各服务完成后独立更新。Cursor 记住可用接口，识别按量消费明确停用的响应，一次查询最多等待 25 秒。收到 429 时遵循 Retry-After，并提供指数退避。

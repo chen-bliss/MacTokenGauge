@@ -71,6 +71,21 @@ final class DataTests: XCTestCase {
         XCTAssertTrue(parsed.onDemandDisabled)
     }
 
+    func testCursorSeparateMetersUseTotalPercentInsteadOfClampedIncludedSpend() throws {
+        let response = data(#"{"displayMessage":"You've hit your usage limit","planUsage":{"includedSpend":2000,"limit":2000,"totalPercentUsed":15.66,"autoPercentUsed":14.21,"apiPercentUsed":73.51}}"#)
+        let parsed = try XCTUnwrap(CursorUsageClient.parse(response))
+        let total = try XCTUnwrap(parsed.windows.first { $0.id == "cursor-total" })
+        XCTAssertEqual(total.usedPercent, 15.66, accuracy: 0.01)
+        XCTAssertEqual(parsed.windows.first { $0.id == "cursor-auto" }?.usedPercent ?? -1, 14.21, accuracy: 0.01)
+        XCTAssertEqual(parsed.windows.first { $0.id == "cursor-api" }?.usedPercent ?? -1, 73.51, accuracy: 0.01)
+    }
+
+    func testCursorIncludedBudgetStillWinsWithoutSeparateMeters() throws {
+        let response = data(#"{"displayMessage":"You've used 64% of your included usage","planUsage":{"includedSpend":1288,"limit":2000,"totalPercentUsed":3.7}}"#)
+        let parsed = try XCTUnwrap(CursorUsageClient.parse(response))
+        XCTAssertEqual(parsed.windows.first { $0.id == "cursor-total" }?.usedPercent ?? -1, 64.4, accuracy: 0.01)
+    }
+
     func testCursorProseFallbackAndCappedOnDemand() throws {
         let response = data(#"{"displayMessage":"Used 100%","spendLimitUsage":{"individualUsed":800,"individualLimit":5000}}"#)
         let parsed = try XCTUnwrap(CursorUsageClient.parse(response))

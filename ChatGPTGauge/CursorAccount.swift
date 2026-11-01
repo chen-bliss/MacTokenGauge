@@ -378,7 +378,9 @@ enum CursorUsageClient {
         var windows: [UsageWindow] = []
 
         if let plan {
-            if let used = includedUsedPercent(plan) {
+            if let total = separateTotalPercent(plan) {
+                windows.append(window(id: "cursor-total", title: "本月", used: total, resetAt: resetAt, windowSeconds: windowSeconds))
+            } else if let used = includedUsedPercent(plan) {
                 windows.append(window(id: "cursor-total", title: "本月", used: used, resetAt: resetAt, windowSeconds: windowSeconds))
             } else if let total = JSONValues.number(plan["totalPercentUsed"]) {
                 windows.append(window(id: "cursor-total", title: "本月", used: total, resetAt: resetAt, windowSeconds: windowSeconds))
@@ -452,8 +454,17 @@ enum CursorUsageClient {
         return nil
     }
 
+    /// Cursor shows one included-usage percent when Auto and API are separate meters.
+    /// Included spend is capped at the dollar limit, so using it there pins the total at 0% remaining
+    /// while `totalPercentUsed` is the percent Cursor itself displays.
+    /// Without those separate meters, included spend still wins. A lone `totalPercentUsed` can stay low after the budget is gone.
+    private static func separateTotalPercent(_ plan: [String: Any]) -> Double? {
+        let hasSplit = JSONValues.number(plan["autoPercentUsed"]) != nil || JSONValues.number(plan["apiPercentUsed"]) != nil
+        guard hasSplit else { return nil }
+        return JSONValues.number(plan["totalPercentUsed"])
+    }
+
     /// Structured included-budget fields win over dashboard prose.
-    /// `totalPercentUsed` is used only when the included budget cannot be calculated.
     /// `remaining` wins when it is present, so a leftover included budget is not shown as empty.
     private static func includedUsedPercent(_ plan: [String: Any]) -> Double? {
         guard let limit = JSONValues.number(plan["limit"]), limit > 0 else { return nil }
