@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.4.5 (2026-11-01)
+
+- Show when the soonest ChatGPT reset card expires. The text turns orange within seven days and red within 48 hours.
+
 ## 1.4.4 (2026-11-01)
 
 - Show the number of ChatGPT reset cards held by the account next to the credits balance.

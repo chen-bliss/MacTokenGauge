@@ -105,6 +105,21 @@ enum UsageParser {
         }
     }
 
+    /// Inventory from the usage summary. The credit list supplies the expiry of the soonest available card.
+    static func parseResetCards(data: Data) -> (count: Int, expiresAt: Date?)? {
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        let cards = (json["credits"] as? [[String: Any]] ?? []).filter { card in
+            guard let status = card["status"] as? String else { return true }
+            return status == "available"
+        }
+        let expiry = cards.compactMap { JSONValues.date($0["expires_at"]) }.min()
+        if let count = number(json["available_count"]) {
+            return (max(0, Int(count.rounded())), expiry)
+        }
+        guard !cards.isEmpty || json["credits"] != nil else { return nil }
+        return (cards.count, expiry)
+    }
+
     /// Cards the account already holds. `applicable_available_count` only says whether one can be applied to the current window.
     private static func resetCards(in json: [String: Any]) -> Int? {
         guard let credits = json["rate_limit_reset_credits"] as? [String: Any],

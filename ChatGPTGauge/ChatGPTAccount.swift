@@ -86,6 +86,7 @@ enum ChatGPTAccountLoader {
             capturedAt: snapshot.capturedAt,
             creditsBalance: snapshot.creditsBalance,
             resetCardCount: snapshot.resetCardCount,
+            resetCardExpiresAt: snapshot.resetCardExpiresAt,
             note: snapshot.source == .localLog ? L10n.s(.localNote) : nil,
             origin: snapshot.source,
             state: snapshot.source == .live ? .current : .local,

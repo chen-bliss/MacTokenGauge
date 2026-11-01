@@ -63,6 +63,7 @@ struct UsageSnapshot: Equatable, Sendable {
     var windows: [UsageWindow]
     var creditsBalance: String?
     var resetCardCount: Int? = nil
+    var resetCardExpiresAt: Date? = nil
     var source: UsageSource
     var capturedAt: Date
 }
@@ -82,6 +83,7 @@ struct ProviderAccount: Identifiable, Equatable, Sendable {
     var capturedAt: Date?
     var creditsBalance: String?
     var resetCardCount: Int? = nil
+    var resetCardExpiresAt: Date? = nil
     var note: String?
     var origin: UsageSource = .live
     var state: AccountState = .current
@@ -210,6 +212,19 @@ enum UsageFormatting {
         if seconds < 3_600 { return L10n.f(.minsAgo, seconds / 60) }
         if seconds < 86_400 { return L10n.f(.hoursAgo, seconds / 3_600) }
         return L10n.f(.daysAgo, seconds / 86_400)
+    }
+
+    enum ResetCardUrgency: Equatable {
+        case normal, soon, urgent
+    }
+
+    /// Orange within seven days, red within 48 hours or after the card has expired.
+    static func resetCardUrgency(expiresAt: Date?, now: Date) -> ResetCardUrgency {
+        guard let expiresAt else { return .normal }
+        let remaining = expiresAt.timeIntervalSince(now)
+        if remaining <= 48 * 3_600 { return .urgent }
+        if remaining <= 7 * 86_400 { return .soon }
+        return .normal
     }
 
     static func planName(_ raw: String?, fallback: String) -> String {

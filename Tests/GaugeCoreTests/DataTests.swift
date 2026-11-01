@@ -28,6 +28,18 @@ final class DataTests: XCTestCase {
         }
     }
 
+    func testResetCardExpiryUsesSoonestAvailableCardAndUrgency() throws {
+        let response = data(#"{"available_count":2,"credits":[{"status":"redeemed","expires_at":"2026-11-02T00:00:00Z"},{"status":"available","expires_at":"2026-11-08T00:00:00Z"},{"status":"available","expires_at":"2026-11-20T00:00:00Z"}]}"#)
+        let cards = try XCTUnwrap(UsageParser.parseResetCards(data: response))
+        XCTAssertEqual(cards.count, 2)
+        XCTAssertEqual(cards.expiresAt, Date(timeIntervalSince1970: 1_794_096_000))
+        let soon = cards.expiresAt!
+        XCTAssertEqual(UsageFormatting.resetCardUrgency(expiresAt: soon, now: soon.addingTimeInterval(-8 * 86_400)), .normal)
+        XCTAssertEqual(UsageFormatting.resetCardUrgency(expiresAt: soon, now: soon.addingTimeInterval(-3 * 86_400)), .soon)
+        XCTAssertEqual(UsageFormatting.resetCardUrgency(expiresAt: soon, now: soon.addingTimeInterval(-3_600)), .urgent)
+        XCTAssertEqual(UsageFormatting.resetCardUrgency(expiresAt: nil, now: soon), .normal)
+    }
+
     func testChatGPTResetCardCountComesFromAvailableCards() throws {
         let response = data(#"{"plan_type":"plus","rate_limit":{"primary_window":{"used_percent":1,"limit_window_seconds":18000}},"credits":{"balance":"0"},"rate_limit_reset_credits":{"available_count":1,"applicable_available_count":0}}"#)
         let snapshot = try XCTUnwrap(UsageParser.parse(data: response, source: .live, capturedAt: moment))

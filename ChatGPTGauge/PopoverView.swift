@@ -173,13 +173,14 @@ private struct AccountSection: View {
                     HStack(spacing: 8) {
                         if let credits = account.creditsBalance {
                             Text(L10n.f(.creditsLine, credits))
+                                .foregroundStyle(.secondary)
                         }
                         if let count = account.resetCardCount {
-                            Text(L10n.f(.resetCards, count))
+                            Text(resetCardText(count: count, expiresAt: account.resetCardExpiresAt, now: now))
+                                .foregroundStyle(resetCardColor(account.resetCardExpiresAt, now: now))
                         }
                     }
                     .font(.caption)
-                    .foregroundStyle(.secondary)
                 }
                 if let note = account.note {
                     Text(note)
@@ -208,6 +209,19 @@ private struct ContentHeightKey: PreferenceKey {
     static var defaultValue: CGFloat = 0
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
         value = max(value, nextValue())
+    }
+}
+
+private func resetCardText(count: Int, expiresAt: Date?, now: Date) -> String {
+    guard let expiresAt else { return L10n.f(.resetCards, count) }
+    return L10n.f(.resetCardsUntil, count, UsageFormatting.clock(expiresAt, now: now))
+}
+
+private func resetCardColor(_ expiresAt: Date?, now: Date) -> Color {
+    switch UsageFormatting.resetCardUrgency(expiresAt: expiresAt, now: now) {
+    case .normal: return .secondary
+    case .soon: return gaugeColor(20)
+    case .urgent: return gaugeColor(0)
     }
 }
 
